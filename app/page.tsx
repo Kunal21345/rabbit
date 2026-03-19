@@ -1,6 +1,13 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent,
+} from "react";
 import {
   Connection,
   EdgeChange,
@@ -29,6 +36,7 @@ import {
   WorkflowEdge,
 } from "@/hooks/useWorkflowGraph";
 
+import { useDebounce } from "@/hooks/useDebounce";
 import { previewWorkflow } from "@/lib/workflow-preview";
 
 /* ====================================================== */
@@ -273,6 +281,10 @@ export default function WorkflowBuilder() {
     useState<string | null>(null);
   const [sheetOpen, setSheetOpen] =
     useState(false);
+  const persistedGraph = useDebounce(
+    { nodes, edges },
+    800
+  );
 
   /* ====================================================== */
   /* Restore */
@@ -310,9 +322,9 @@ export default function WorkflowBuilder() {
 
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ nodes, edges })
+      JSON.stringify(persistedGraph)
     );
-  }, [nodes, edges, hydrated]);
+  }, [persistedGraph, hydrated]);
 
   /* ====================================================== */
   /* Derived */
@@ -332,30 +344,8 @@ export default function WorkflowBuilder() {
     );
   }, [nodes]);
 
-  const ghostNodes = useMemo(() => {
-    const virtual: WorkflowNode[] = [];
-
-    nodes.forEach((node) => {
-      const bucket = edgeMap.get(node.id);
-
-      if (!bucket?.yes) {
-        virtual.push(
-          createPlaceholderNode(node, "yes")
-        );
-      }
-
-      if (!bucket?.no) {
-        virtual.push(
-          createPlaceholderNode(node, "no")
-        );
-      }
-    });
-
-    return virtual;
-  }, [nodes, edgeMap]);
-
   const canvasNodes = useMemo(() => {
-    const real = nodes.map((node) => ({
+    return nodes.map((node) => ({
       ...node,
       data: {
         ...node.data,
@@ -363,28 +353,12 @@ export default function WorkflowBuilder() {
         nodeLabelMap,
       },
     }));
-
-    return [...real, ...ghostNodes];
-  }, [nodes, ghostNodes, edgeMap, nodeLabelMap]);
+  }, [nodes, edgeMap, nodeLabelMap]);
 
   const canvasEdges = useMemo(() => {
     const virtual: WorkflowEdge[] = [];
 
-    nodes.forEach((node) => {
-      const bucket = edgeMap.get(node.id);
-
-      if (!bucket?.yes) {
-        virtual.push(
-          createPlaceholderEdge(node, "yes")
-        );
-      }
-
-      if (!bucket?.no) {
-        virtual.push(
-          createPlaceholderEdge(node, "no")
-        );
-      }
-    });
+    nodes.forEach((node) => edges, [edges]);
 
     return [...edges, ...virtual];
   }, [nodes, edges, edgeMap]);
@@ -419,6 +393,42 @@ export default function WorkflowBuilder() {
       noNextNodeId: edge.no?.target || "",
     };
   }, [nodes, selectedNodeId, edgeMap]);
+
+  const nodeOptions = useMemo(
+    () =>
+      nodes.map((node) => ({
+        id: node.id,
+        label: node.data.label,
+      })),
+    [nodes]
+  );
+
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      setEdges((prev) =>
+        applyEdgeChanges(
+          changes,
+          prev
+        ) as WorkflowEdge[]
+      );
+    },
+    [setEdges]
+  );
+
+  const handleConnect = useCallback(
+    (connection: Connection) => {
+      connectEdge(connection);
+    },
+    [connectEdge]
+  );
+
+  const handleNodeClick = useCallback(
+    (_: MouseEvent, node: WorkflowNode) => {
+      setSelectedNodeId(node.id);
+      setSheetOpen(true);
+    },
+    []
+  );
 
   /* ====================================================== */
   /* Save */
@@ -499,23 +509,9 @@ export default function WorkflowBuilder() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
-        onEdgesChange={(changes: EdgeChange[]) =>
-          setEdges((prev) =>
-            applyEdgeChanges(
-              changes,
-              prev
-            ) as WorkflowEdge[]
-          )
-        }
-        onConnect={(connection: Connection) =>
-          connectEdge(connection)
-        }
-        onNodeClick={(_, node) => {
-          if (node.id.includes("-ghost")) return;
-
-          setSelectedNodeId(node.id);
-          setSheetOpen(true);
-        }}
+        onEdgesChange={handleEdgesChange}
+        onConnect={handleConnect}
+        onNodeClick={handleNodeClick}
         fitView
       />
 
@@ -524,10 +520,7 @@ export default function WorkflowBuilder() {
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         onSave={handleSave}
-        nodes={nodes.map((node) => ({
-          id: node.id,
-          label: node.data.label,
-        }))}
+        nodes={nodeOptions}
       />
     </div>
   );
