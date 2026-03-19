@@ -13,7 +13,7 @@ import {
   EdgeChange,
   applyEdgeChanges,
 } from "@xyflow/react";
-
+import { Header } from "@/components/header";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
 
@@ -485,23 +485,16 @@ export default function WorkflowBuilder() {
 
   return (
     <div className="w-full h-screen relative">
-      <div className="absolute top-4 left-4 z-10 flex gap-3">
-        <button
-          onClick={addNode}
-          className="px-4 py-2 bg-black text-white rounded"
-        >
-          + Add Node
-        </button>
-
-        <button
-          onClick={handlePreview}
-          className="px-4 py-2 border rounded"
-        >
+      <Header>
+        <button onClick={handlePreview} className="px-4 py-2 border rounded">
           Preview
         </button>
-
+        <button onClick={addNode} className="px-4 py-2 border rounded">
+          Add Node
+        </button>
         <ThemeToggle />
-      </div>
+
+        </Header>
 
       <Canvas
         nodes={canvasNodes}
