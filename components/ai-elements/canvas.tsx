@@ -259,6 +259,8 @@ export function Canvas<
     targetX: number;
     targetY: number;
   } | null>(null);
+  const [reconnectingEdgeId, setReconnectingEdgeId] =
+    useState<string | null>(null);
   const [hoveredTargetNodeId, setHoveredTargetNodeId] =
     useState<string | null>(null);
   const [containerSize, setContainerSize] = useState({
@@ -459,13 +461,19 @@ export function Canvas<
 
           if (!hasTarget) return false;
 
-          const handleX = node.left;
-          const handleY = (node.top + node.bottom) / 2;
+          const insideNode =
+            worldX >= node.left &&
+            worldX <= node.right &&
+            worldY >= node.top &&
+            worldY <= node.bottom;
 
-          return (
-            Math.abs(worldX - handleX) <= 18 &&
-            Math.abs(worldY - handleY) <= 18
-          );
+          const nearTargetHandle =
+            Math.abs(worldX - node.left) <= 18 &&
+            Math.abs(
+              worldY - (node.top + node.bottom) / 2
+            ) <= 18;
+
+          return insideNode || nearTargetHandle;
         }) || null
       );
     },
@@ -760,6 +768,7 @@ export function Canvas<
 
         setHoveredTargetNodeId(null);
         setConnectionPreview(null);
+        setReconnectingEdgeId(null);
         event.currentTarget.releasePointerCapture(
           event.pointerId
         );
@@ -781,10 +790,13 @@ export function Canvas<
             pointerState.edgeId,
             targetNode.id
           );
+        } else if (!targetNode) {
+          onDeleteEdge?.(pointerState.edgeId);
         }
 
         setHoveredTargetNodeId(null);
         setConnectionPreview(null);
+        setReconnectingEdgeId(null);
         event.currentTarget.releasePointerCapture(
           event.pointerId
         );
@@ -801,6 +813,7 @@ export function Canvas<
     },
     [
       clearPointerState,
+      onDeleteEdge,
       getTargetNodeAtClientPosition,
       onConnect,
       onReconnectEdgeTarget,
@@ -990,6 +1003,10 @@ export function Canvas<
           }}
         >
           {edgeGeometry.map(({ edge, sourceX, sourceY, targetX, targetY }) => {
+            if (reconnectingEdgeId === edge.id) {
+              return null;
+            }
+
             const EdgeComponent = edgeTypes[edge.type || "animated"];
             const path = getBezierPath({
               sourceX,
@@ -1024,6 +1041,36 @@ export function Canvas<
                       event.stopPropagation();
                       setSelectedNodeIds([]);
                       setSelectedEdgeId(edge.id);
+                    }}
+                    onPointerDown={(event) => {
+                      if (!isSelected) return;
+
+                      event.stopPropagation();
+
+                      pointerStateRef.current = {
+                        mode: "reconnect-edge",
+                        pointerId: event.pointerId,
+                        edgeId: edge.id,
+                        sourceNodeId: edge.source,
+                        startClientX: event.clientX,
+                        startClientY: event.clientY,
+                        currentClientX: event.clientX,
+                        currentClientY: event.clientY,
+                      };
+
+                      setConnectionPreview({
+                        edgeId: edge.id,
+                        sourceNodeId: edge.source,
+                        sourceX,
+                        sourceY,
+                        targetX,
+                        targetY,
+                      });
+                      setReconnectingEdgeId(edge.id);
+                      setHoveredTargetNodeId(null);
+                      containerRef.current?.setPointerCapture(
+                        event.pointerId
+                      );
                     }}
                   />
                   {isSelected ? (
@@ -1061,10 +1108,11 @@ export function Canvas<
                           targetX,
                           targetY,
                         });
+                        setReconnectingEdgeId(edge.id);
                         setHoveredTargetNodeId(null);
-                        (
-                          event.currentTarget as SVGCircleElement
-                        ).setPointerCapture(event.pointerId);
+                        containerRef.current?.setPointerCapture(
+                          event.pointerId
+                        );
                       }}
                     />
                   ) : null}
@@ -1223,8 +1271,9 @@ export function Canvas<
                           DEFAULT_NODE_SIZE.height) /
                           2,
                     });
+                    setReconnectingEdgeId(null);
                     setHoveredTargetNodeId(null);
-                    event.currentTarget.setPointerCapture(
+                    containerRef.current?.setPointerCapture(
                       event.pointerId
                     );
                   }}
