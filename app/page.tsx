@@ -8,11 +8,6 @@ import {
   useState,
   type MouseEvent,
 } from "react";
-import {
-  Connection,
-  EdgeChange,
-  applyEdgeChanges,
-} from "@xyflow/react";
 import { Header } from "@/components/header";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
@@ -38,10 +33,6 @@ import {
 
 import { useDebounce } from "@/hooks/useDebounce";
 import { previewWorkflow } from "@/lib/workflow-preview";
-
-/* ====================================================== */
-
-const STORAGE_KEY = "workflow-graph-v14";
 
 /* ====================================================== */
 
@@ -84,30 +75,93 @@ const initialNodes: WorkflowNode[] = [
       },
     },
   },
+  {
+    id: "review",
+    type: "workflow",
+    position: { x: 600, y: -300 },
+    data: {
+      label: "Review",
+      description: "Evaluate the workflow input",
+      businessRule: "",
+      aiRuleDefinition: "",
+      aiTestRules: "",
+      comments: "",
+      handles: {
+        source: true,
+        target: true,
+      },
+    },
+  },
+  {
+    id: "end",
+    type: "workflow",
+    position: { x: 600, y: 300 },
+    data: {
+      label: "End",
+      description: "Complete the workflow",
+      businessRule: "",
+      aiRuleDefinition: "",
+      aiTestRules: "",
+      comments: "",
+      handles: {
+        source: false,
+        target: true,
+      },
+    },
+  },
 ];
 
-const initialEdges: WorkflowEdge[] = [];
+const initialEdges: WorkflowEdge[] = [
+  {
+    id: "start-review",
+    source: "start",
+    target: "review",
+    label: "YES",
+    type: "animated",
+  },
+  {
+    id: "start-end",
+    source: "start",
+    target: "end",
+    label: "NO",
+    type: "temporary",
+  },
+];
+
+function hashSeedGraph(value: string) {
+  let hash = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+
+  return hash.toString(16);
+}
+
+const STORAGE_KEY = `workflow-graph-${hashSeedGraph(
+  JSON.stringify({
+    nodes: initialNodes,
+    edges: initialEdges,
+  })
+)}`;
 
 /* ====================================================== */
 /* Helpers */
 /* ====================================================== */
 
 function buildEdgeMap(edges: WorkflowEdge[]) {
-  const grouped = new Map<string, WorkflowEdge[]>();
-
-  edges.forEach((edge) => {
-    const list = grouped.get(edge.source) || [];
-    list.push(edge);
-    grouped.set(edge.source, list);
-  });
-
   const result = new Map<string, EdgeBucket>();
 
-  grouped.forEach((list, source) => {
-    result.set(source, {
-      yes: list[0],
-      no: list[1],
-    });
+  edges.forEach((edge) => {
+    const bucket = result.get(edge.source) || {};
+
+    if (edge.label === "NO") {
+      bucket.no = edge;
+    } else {
+      bucket.yes = edge;
+    }
+
+    result.set(edge.source, bucket);
   });
 
   return result;
@@ -150,48 +204,6 @@ function replaceEdge(
     ...otherEdges,
     ...sourceEdges.filter(Boolean),
   ];
-}
-
-function createPlaceholderNode(
-  node: WorkflowNode,
-  branch: "yes" | "no"
-): WorkflowNode {
-  return {
-    id: `${node.id}-${branch}-ghost`,
-    type: "workflow",
-    position: {
-      x: node.position.x + 220,
-      y:
-        branch === "yes"
-          ? node.position.y - 60
-          : node.position.y + 60,
-    },
-    data: {
-      label: "",
-      description: "",
-      businessRule: "",
-      aiRuleDefinition: "",
-      aiTestRules: "",
-      comments: "",
-      hidden: true,
-      handles: {
-        source: false,
-        target: true,
-      },
-    },
-  };
-}
-
-function createPlaceholderEdge(
-  node: WorkflowNode,
-  branch: "yes" | "no"
-): WorkflowEdge {
-  return {
-    id: `${node.id}-${branch}-placeholder`,
-    source: node.id,
-    target: `${node.id}-${branch}-ghost`,
-    type: "temporary",
-  };
 }
 
 /* ====================================================== */
@@ -270,10 +282,9 @@ export default function WorkflowBuilder() {
     edges,
     setNodes,
     setEdges,
-    onNodesChange,
+    moveNode,
     addNode,
     updateNode,
-    connectEdge,
   } = useWorkflowGraph(initialNodes, initialEdges);
 
   const [hydrated, setHydrated] = useState(false);
@@ -355,13 +366,10 @@ export default function WorkflowBuilder() {
     }));
   }, [nodes, edgeMap, nodeLabelMap]);
 
-  const canvasEdges = useMemo(() => {
-    const virtual: WorkflowEdge[] = [];
-
-    nodes.forEach((node) => edges, [edges]);
-
-    return [...edges, ...virtual];
-  }, [nodes, edges, edgeMap]);
+  const canvasEdges = useMemo(
+    () => edges,
+    [edges]
+  );
 
   /* ====================================================== */
   /* Selected Node */
@@ -403,27 +411,8 @@ export default function WorkflowBuilder() {
     [nodes]
   );
 
-  const handleEdgesChange = useCallback(
-    (changes: EdgeChange[]) => {
-      setEdges((prev) =>
-        applyEdgeChanges(
-          changes,
-          prev
-        ) as WorkflowEdge[]
-      );
-    },
-    [setEdges]
-  );
-
-  const handleConnect = useCallback(
-    (connection: Connection) => {
-      connectEdge(connection);
-    },
-    [connectEdge]
-  );
-
   const handleNodeClick = useCallback(
-    (_: MouseEvent, node: WorkflowNode) => {
+    (_event: MouseEvent<HTMLDivElement>, node: WorkflowNode) => {
       setSelectedNodeId(node.id);
       setSheetOpen(true);
     },
@@ -501,9 +490,7 @@ export default function WorkflowBuilder() {
         edges={canvasEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onConnect={handleConnect}
+        onNodePositionChange={moveNode}
         onNodeClick={handleNodeClick}
         fitView
       />

@@ -1,12 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import {
-  addEdge,
-  applyNodeChanges,
-  Connection,
-  NodeChange,
-} from "@xyflow/react";
 
 /* ====================================================== */
 /* Types */
@@ -47,6 +41,11 @@ export type WorkflowEdge = {
   type?: string;
 };
 
+export type WorkflowConnection = {
+  source: string;
+  target: string;
+};
+
 /* ====================================================== */
 /* Helpers */
 /* ====================================================== */
@@ -59,7 +58,7 @@ function buildNextNodePosition(nodes: WorkflowNode) {
 }
 
 function normalizeLabels(edges: WorkflowEdge[], source: string) {
-  return edges.map((edge, index) => {
+  return edges.map((edge) => {
     if (edge.source !== source) return edge;
 
     const sourceEdges = edges.filter((e) => e.source === source);
@@ -145,15 +144,27 @@ export function useWorkflowGraph(
   /* Node Changes */
   /* ====================================================== */
 
-  const onNodesChange = useCallback((changes: NodeChange[]) => {
-    setNodes((prev) => applyNodeChanges(changes, prev) as WorkflowNode[]);
-  }, []);
+  const moveNode = useCallback(
+    (id: string, position: WorkflowNode["position"]) => {
+      setNodes((prev) =>
+        prev.map((node) =>
+          node.id === id
+            ? {
+                ...node,
+                position,
+              }
+            : node
+        )
+      );
+    },
+    []
+  );
 
   /* ====================================================== */
   /* Connect Edge */
   /* ====================================================== */
 
-  const connectEdge = useCallback((connection: Connection) => {
+  const connectEdge = useCallback((connection: WorkflowConnection) => {
     if (!connection.source || !connection.target) return;
 
     setEdges((prev) => {
@@ -173,15 +184,15 @@ export function useWorkflowGraph(
 
       const label = sourceEdges.length === 0 ? "YES" : "NO";
 
-      const next = addEdge(
+      const next = [
+        ...prev,
         {
           ...connection,
           id: `${connection.source}-${connection.target}`,
           label,
-          type: "animated",
+          type: label === "YES" ? "animated" : "temporary",
         },
-        prev
-      ) as WorkflowEdge[];
+      ] as WorkflowEdge[];
 
       return normalizeLabels(next, connection.source);
     });
@@ -222,7 +233,7 @@ export function useWorkflowGraph(
     setEdges,
     addNode,
     updateNode,
-    onNodesChange,
+    moveNode,
     connectEdge,
     removeEdge,
   };

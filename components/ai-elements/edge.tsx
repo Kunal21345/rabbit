@@ -1,145 +1,88 @@
-import type { EdgeProps, InternalNode, Node } from "@xyflow/react";
+import type { CanvasEdgeComponentProps } from "@/components/ai-elements/canvas";
 
-import {
-  BaseEdge,
-  getBezierPath,
-  getSimpleBezierPath,
-  Position,
-  useInternalNode,
-} from "@xyflow/react";
-
-const Temporary = ({
-  id,
+function buildBezierPath({
   sourceX,
   sourceY,
   targetX,
   targetY,
-  sourcePosition,
-  targetPosition,
-}: EdgeProps) => {
-  const [edgePath] = getSimpleBezierPath({
-    sourcePosition,
-    sourceX,
-    sourceY,
-    targetPosition,
-    targetX,
-    targetY,
-  });
+}: Pick<
+  CanvasEdgeComponentProps,
+  "sourceX" | "sourceY" | "targetX" | "targetY"
+>) {
+  const curve = Math.max(Math.abs(targetX - sourceX) * 0.4, 60);
+
+  return `M ${sourceX} ${sourceY} C ${sourceX + curve} ${sourceY}, ${targetX - curve} ${targetY}, ${targetX} ${targetY}`;
+}
+
+function EdgeLabel({
+  label,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+}: CanvasEdgeComponentProps) {
+  if (!label) return null;
+
+  const labelX = (sourceX + targetX) / 2;
+  const labelY = (sourceY + targetY) / 2;
 
   return (
-    <BaseEdge
-      className="stroke-1 stroke-ring"
-      id={id}
-      path={edgePath}
-      style={{
-        strokeDasharray: "5, 5",
-      }}
-    />
-  );
-};
-
-const getHandleCoordsByPosition = (
-  node: InternalNode<Node>,
-  handlePosition: Position
-) => {
-  // Choose the handle type based on position - Left is for target, Right is for source
-  const handleType = handlePosition === Position.Left ? "target" : "source";
-
-  const handle = node.internals.handleBounds?.[handleType]?.find(
-    (h) => h.position === handlePosition
-  );
-
-  if (!handle) {
-    return [0, 0] as const;
-  }
-
-  let offsetX = handle.width / 2;
-  let offsetY = handle.height / 2;
-
-  // this is a tiny detail to make the markerEnd of an edge visible.
-  // The handle position that gets calculated has the origin top-left, so depending which side we are using, we add a little offset
-  // when the handlePosition is Position.Right for example, we need to add an offset as big as the handle itself in order to get the correct position
-  switch (handlePosition) {
-    case Position.Left: {
-      offsetX = 0;
-      break;
-    }
-    case Position.Right: {
-      offsetX = handle.width;
-      break;
-    }
-    case Position.Top: {
-      offsetY = 0;
-      break;
-    }
-    case Position.Bottom: {
-      offsetY = handle.height;
-      break;
-    }
-    default: {
-      throw new Error(`Invalid handle position: ${handlePosition}`);
-    }
-  }
-
-  const x = node.internals.positionAbsolute.x + handle.x + offsetX;
-  const y = node.internals.positionAbsolute.y + handle.y + offsetY;
-
-  return [x, y] as const;
-};
-
-const getEdgeParams = (
-  source: InternalNode<Node>,
-  target: InternalNode<Node>
-) => {
-  const sourcePos = Position.Right;
-  const [sx, sy] = getHandleCoordsByPosition(source, sourcePos);
-  const targetPos = Position.Left;
-  const [tx, ty] = getHandleCoordsByPosition(target, targetPos);
-
-  return {
-    sourcePos,
-    sx,
-    sy,
-    targetPos,
-    tx,
-    ty,
-  };
-};
-
-const Animated = ({ id, source, target, markerEnd, style }: EdgeProps) => {
-  const sourceNode = useInternalNode(source);
-  const targetNode = useInternalNode(target);
-
-  if (!(sourceNode && targetNode)) {
-    return null;
-  }
-
-  const { sx, sy, tx, ty, sourcePos, targetPos } = getEdgeParams(
-    sourceNode,
-    targetNode
-  );
-
-  const [edgePath] = getBezierPath({
-    sourcePosition: sourcePos,
-    sourceX: sx,
-    sourceY: sy,
-    targetPosition: targetPos,
-    targetX: tx,
-    targetY: ty,
-  });
-
-  return (
-    <>
-      <BaseEdge
-        id={id}
-        markerEnd={markerEnd}
-        path={edgePath}
-        style={{
-          strokeDasharray: "8 6",
-          ...style,
-        }}
+    <g>
+      <rect
+        fill="var(--background)"
+        height="22"
+        rx="10"
+        width={Math.max(28, label.length * 9)}
+        x={labelX - Math.max(14, (label.length * 9) / 2)}
+        y={labelY - 11}
       />
-    </>
+      <text
+        dominantBaseline="middle"
+        fill="currentColor"
+        fontSize="10"
+        fontWeight="600"
+        textAnchor="middle"
+        x={labelX}
+        y={labelY}
+      >
+        {label}
+      </text>
+    </g>
+  );
+}
+
+const Temporary = (props: CanvasEdgeComponentProps) => {
+  const path = buildBezierPath(props);
+
+  return (
+    <g>
+      <path
+        d={path}
+        fill="none"
+        stroke="currentColor"
+        strokeDasharray="6 6"
+        strokeOpacity="0.45"
+        strokeWidth="1.5"
+      />
+      <EdgeLabel {...props} />
+    </g>
+  );
+};
+
+const Animated = (props: CanvasEdgeComponentProps) => {
+  const path = buildBezierPath(props);
+
+  return (
+    <g>
+      <path
+        d={path}
+        fill="none"
+        stroke="currentColor"
+        strokeOpacity="0.65"
+        strokeWidth="1.8"
+      />
+      <EdgeLabel {...props} />
+    </g>
   );
 };
 

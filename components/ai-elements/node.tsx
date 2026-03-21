@@ -10,7 +10,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { Handle, Position } from "@xyflow/react";
 
 export type NodeProps = ComponentProps<typeof Card> & {
   handles: {
@@ -27,8 +26,12 @@ export const Node = ({ handles, className, ...props }: NodeProps) => (
     )}
     {...props}
   >
-    {handles.target && <Handle position={Position.Left} type="target" />}
-    {handles.source && <Handle position={Position.Right} type="source" />}
+    {handles.target && (
+      <span className="pointer-events-none absolute left-0 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-background shadow-sm" />
+    )}
+    {handles.source && (
+      <span className="pointer-events-none absolute right-0 top-1/2 h-3 w-3 translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-background shadow-sm" />
+    )}
     {props.children}
   </Card>
 );

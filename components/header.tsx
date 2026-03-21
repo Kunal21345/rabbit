@@ -9,7 +9,7 @@ type HeaderProps = {
 
 export function Header({ children }: HeaderProps) {
   return (
-    <header className="flex items-center justify-between border-b border-border px-6 py-4">
+    <header className="flex items-center justify-between px-6 py-4 bg-none absolute top-0 left-0 w-full z-10">
       <div className="flex items-center gap-3">
         <Image
           src="/logo.svg"

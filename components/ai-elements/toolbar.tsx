@@ -1,17 +1,15 @@
 import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/utils";
-import { NodeToolbar, Position } from "@xyflow/react";
 
-type ToolbarProps = ComponentProps<typeof NodeToolbar>;
+type ToolbarProps = ComponentProps<"div">;
 
 export const Toolbar = ({ className, ...props }: ToolbarProps) => (
-  <NodeToolbar
+  <div
     className={cn(
       "flex items-center gap-1 rounded-sm border bg-background p-1.5",
       className
     )}
-    position={Position.Bottom}
     {...props}
   />
 );

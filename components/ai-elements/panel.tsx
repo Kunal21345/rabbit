@@ -1,12 +1,11 @@
 import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/utils";
-import { Panel as PanelPrimitive } from "@xyflow/react";
 
-type PanelProps = ComponentProps<typeof PanelPrimitive>;
+type PanelProps = ComponentProps<"div">;
 
 export const Panel = ({ className, ...props }: PanelProps) => (
-  <PanelPrimitive
+  <div
     className={cn(
       "m-4 overflow-hidden rounded-md border bg-card p-1",
       className

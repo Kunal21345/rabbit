@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { applyNodeChanges, type NodeChange } from "@xyflow/react";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge } from "@/components/ai-elements/edge";
 import {
@@ -352,12 +351,6 @@ export default function ProcessFlowPage() {
     setLiveEdges(cloneEdges());
   }, []);
 
-  const handleNodesChange = useCallback(
-    (changes: NodeChange[]) =>
-      setLiveNodes((nds) => applyNodeChanges(changes, nds) as WorkflowNode[]),
-    []
-  );
-
   return (
     <div className="dark w-screen h-screen bg-zinc-950 relative overflow-hidden">
       {/* Title */}
@@ -387,7 +380,18 @@ export default function ProcessFlowPage() {
         fitView
         nodes={liveNodes}
         nodeTypes={NODE_TYPES}
-        onNodesChange={handleNodesChange}
+        onNodePositionChange={(nodeId, position) =>
+          setLiveNodes((prev) =>
+            prev.map((node) =>
+              node.id === nodeId
+                ? {
+                    ...node,
+                    position,
+                  }
+                : node
+            )
+          )
+        }
         style={{ background: "hsl(0 0% 0%)" }}
       />
 
@@ -395,14 +399,6 @@ export default function ProcessFlowPage() {
         @keyframes statusPulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50%       { opacity: 0.4; transform: scale(1.8); }
-        }
-
-        .react-flow__background {
-          background-color: #000000 !important;
-        }
-        .react-flow__background pattern > * {
-          stroke: #27272a !important;
-          fill: #27272a !important;
         }
       `}</style>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
@@ -82,11 +82,19 @@ const edgeTypes = {
 /* -------------------------------------------------- */
 
 export default function PreviewPage() {
-  const [workflow, setWorkflow] =
-    useState<{
+  const [workflow] = useState<{
       nodes: WorkflowNode[];
       edges: WorkflowEdge[];
-    } | null>(null);
+    } | null>(() => {
+      if (typeof window === "undefined")
+        return null;
+
+      const saved = localStorage.getItem(
+        "workflow-preview"
+      );
+
+      return saved ? JSON.parse(saved) : null;
+    });
 
   const [selectedNodeId, setSelectedNodeId] =
     useState<string | null>(null);
@@ -96,18 +104,6 @@ export default function PreviewPage() {
 
   const [result, setResult] =
     useState<string>("");
-
-  /* -------------------------------------------------- */
-
-  useEffect(() => {
-    const saved = localStorage.getItem(
-      "workflow-preview"
-    );
-
-    if (saved) {
-      setWorkflow(JSON.parse(saved));
-    }
-  }, []);
 
   /* -------------------------------------------------- */
 

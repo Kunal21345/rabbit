@@ -1,7 +1,6 @@
 "use client";
 
-import { Edge } from "@xyflow/react";
-import { WorkflowNode } from "@/hooks/useWorkflowGraph";
+import { WorkflowEdge, WorkflowNode } from "@/hooks/useWorkflowGraph";
 import { useWorkflowPersistence } from "@/hooks/useWorkflowPersistence";
 
 /* -------------------------------------------------- */
@@ -10,7 +9,7 @@ import { useWorkflowPersistence } from "@/hooks/useWorkflowPersistence";
 
 interface GraphPersistenceProps {
   nodes: WorkflowNode[];
-  edges: Edge[];
+  edges: WorkflowEdge[];
 }
 
 /* -------------------------------------------------- */

@@ -1,8 +1,6 @@
 import { useEffect, useRef } from "react";
-import { Edge } from "@xyflow/react";
-import { useReactFlow } from "@xyflow/react";
 
-import { WorkflowNode } from "@/hooks/useWorkflowGraph";
+import { WorkflowEdge, WorkflowNode } from "@/hooks/useWorkflowGraph";
 
 /* -------------------------------------------------- */
 /* Storage */
@@ -16,10 +14,8 @@ const STORAGE_KEY = "workflow-graph-v3";
 
 export function useWorkflowPersistence(
   nodes: WorkflowNode[],
-  edges: Edge[]
+  edges: WorkflowEdge[]
 ) {
-  const { getViewport } = useReactFlow();
-
   const timeoutRef =
     useRef<ReturnType<typeof setTimeout> | null>(
       null
@@ -37,7 +33,6 @@ export function useWorkflowPersistence(
           JSON.stringify({
             nodes,
             edges,
-            viewport: getViewport(),
           })
         );
       } catch (error) {
@@ -53,5 +48,5 @@ export function useWorkflowPersistence(
         clearTimeout(timeoutRef.current);
       }
     };
-  }, [nodes, edges, getViewport]);
+  }, [nodes, edges]);
 }
