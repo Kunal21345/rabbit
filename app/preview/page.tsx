@@ -50,10 +50,12 @@ type WorkflowEdge = {
 const nodeTypes = {
   workflow: ({
     data,
+    selected,
   }: {
     data: WorkflowNode["data"];
+    selected?: boolean;
   }) => (
-    <CustomNode handles={data.handles}>
+    <CustomNode handles={data.handles} selected={selected}>
       <NodeHeader>
         <NodeTitle>{data.label}</NodeTitle>
         <NodeDescription>{data.description}</NodeDescription>

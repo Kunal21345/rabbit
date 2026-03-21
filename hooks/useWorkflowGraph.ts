@@ -172,8 +172,6 @@ export function useWorkflowGraph(
         (edge) => edge.source === connection.source
       );
 
-      if (sourceEdges.length >= 2) return prev;
-
       const exists = prev.some(
         (edge) =>
           edge.source === connection.source &&
@@ -181,6 +179,8 @@ export function useWorkflowGraph(
       );
 
       if (exists) return prev;
+
+      if (sourceEdges.length >= 2) return prev;
 
       const label = sourceEdges.length === 0 ? "YES" : "NO";
 
@@ -213,6 +213,78 @@ export function useWorkflowGraph(
     });
   }, []);
 
+  const updateEdgeTarget = useCallback(
+    (edgeId: string, target: string) => {
+      setEdges((prev) => {
+        const currentEdge = prev.find(
+          (edge) => edge.id === edgeId
+        );
+
+        if (!currentEdge || currentEdge.target === target) {
+          return prev;
+        }
+
+        const duplicate = prev.some(
+          (edge) =>
+            edge.id !== edgeId &&
+            edge.source === currentEdge.source &&
+            edge.target === target
+        );
+
+        if (duplicate) return prev;
+
+        const next = prev.map((edge) =>
+          edge.id === edgeId
+            ? {
+                ...edge,
+                id: `${edge.source}-${target}`,
+                target,
+                type:
+                  edge.label === "NO"
+                    ? "temporary"
+                    : "animated",
+              }
+            : edge
+        );
+
+        return normalizeLabels(next, currentEdge.source);
+      });
+    },
+    []
+  );
+
+  /* ====================================================== */
+  /* Remove Nodes */
+  /* ====================================================== */
+
+  const removeNodes = useCallback((nodeIds: string[]) => {
+    if (nodeIds.length === 0) return;
+
+    const idSet = new Set(nodeIds);
+
+    setNodes((prev) =>
+      prev.filter((node) => !idSet.has(node.id))
+    );
+
+    setEdges((prev) => {
+      let next = prev.filter(
+        (edge) =>
+          !idSet.has(edge.source) &&
+          !idSet.has(edge.target)
+      );
+
+      const remainingSources = new Set(
+        next.map((edge) => edge.source)
+      );
+
+      remainingSources.forEach((source) => {
+        next = normalizeLabels(next, source);
+      });
+
+      return next;
+    });
+  }, []);
+
   /* ====================================================== */
   /* Memo */
   /* ====================================================== */
@@ -235,6 +307,8 @@ export function useWorkflowGraph(
     updateNode,
     moveNode,
     connectEdge,
+    updateEdgeTarget,
     removeEdge,
+    removeNodes,
   };
 }

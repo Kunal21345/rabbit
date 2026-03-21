@@ -213,17 +213,19 @@ function replaceEdge(
 const WorkflowNodeRenderer = memo(
   function WorkflowNodeRenderer({
     data,
+    selected,
   }: {
     data: WorkflowNodeData & {
       edge?: EdgeBucket;
       nodeLabelMap?: Map<string, string>;
       hidden?: boolean;
     };
+    selected?: boolean;
   }) {
     if (data.hidden) return null;
 
     return (
-      <CustomNode handles={data.handles}>
+      <CustomNode handles={data.handles} selected={selected}>
         <NodeHeader>
           <NodeTitle>{data.label}</NodeTitle>
           <NodeDescription>
@@ -284,7 +286,11 @@ export default function WorkflowBuilder() {
     setEdges,
     moveNode,
     addNode,
+    connectEdge,
+    updateEdgeTarget,
     updateNode,
+    removeEdge,
+    removeNodes,
   } = useWorkflowGraph(initialNodes, initialEdges);
 
   const [hydrated, setHydrated] = useState(false);
@@ -419,6 +425,28 @@ export default function WorkflowBuilder() {
     []
   );
 
+  const handleDeleteNodes = useCallback(
+    (nodeIds: string[]) => {
+      removeNodes(nodeIds);
+
+      if (
+        selectedNodeId &&
+        nodeIds.includes(selectedNodeId)
+      ) {
+        setSelectedNodeId(null);
+        setSheetOpen(false);
+      }
+    },
+    [removeNodes, selectedNodeId]
+  );
+
+  const handleDeleteEdge = useCallback(
+    (edgeId: string) => {
+      removeEdge(edgeId);
+    },
+    [removeEdge]
+  );
+
   /* ====================================================== */
   /* Save */
   /* ====================================================== */
@@ -492,6 +520,10 @@ export default function WorkflowBuilder() {
         edgeTypes={edgeTypes}
         onNodePositionChange={moveNode}
         onNodeClick={handleNodeClick}
+        onDeleteNodes={handleDeleteNodes}
+        onDeleteEdge={handleDeleteEdge}
+        onConnect={connectEdge}
+        onReconnectEdgeTarget={updateEdgeTarget}
         fitView
       />
 

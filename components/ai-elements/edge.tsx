@@ -32,6 +32,9 @@ function EdgeLabel({
         fill="var(--background)"
         height="22"
         rx="10"
+        stroke="currentColor"
+        strokeOpacity="0.18"
+        strokeWidth="1"
         width={Math.max(28, label.length * 9)}
         x={labelX - Math.max(14, (label.length * 9) / 2)}
         y={labelY - 11}
@@ -39,7 +42,7 @@ function EdgeLabel({
       <text
         dominantBaseline="middle"
         fill="currentColor"
-        fontSize="10"
+        fontSize="11"
         fontWeight="600"
         textAnchor="middle"
         x={labelX}
@@ -61,8 +64,8 @@ const Temporary = (props: CanvasEdgeComponentProps) => {
         fill="none"
         stroke="currentColor"
         strokeDasharray="6 6"
-        strokeOpacity="0.45"
-        strokeWidth="1.5"
+        strokeOpacity={props.selected ? 0.9 : 0.45}
+        strokeWidth={props.selected ? 2.2 : 1.5}
       />
       <EdgeLabel {...props} />
     </g>
@@ -78,8 +81,8 @@ const Animated = (props: CanvasEdgeComponentProps) => {
         d={path}
         fill="none"
         stroke="currentColor"
-        strokeOpacity="0.65"
-        strokeWidth="1.8"
+        strokeOpacity={props.selected ? 0.95 : 0.65}
+        strokeWidth={props.selected ? 2.4 : 1.8}
       />
       <EdgeLabel {...props} />
     </g>

@@ -139,6 +139,7 @@ const EDGE_TYPES = { animated: Edge.Animated, temporary: Edge.Temporary };
 
 const WorkflowNodeComponent = ({
   data,
+  selected,
 }: {
   data: WorkflowNodeData;
   selected?: boolean;
@@ -153,7 +154,7 @@ const WorkflowNodeComponent = ({
   const handles = data.handles     as { target: boolean; source: boolean };
 
   return (
-    <Node handles={handles}>
+    <Node handles={handles} selected={selected}>
       <NodeHeader>
         <div className="flex items-center gap-2.5">
           <span style={{ color: cfg.color, fontSize: 15, lineHeight: 1 }}>{icon}</span>

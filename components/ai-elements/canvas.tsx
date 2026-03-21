@@ -11,6 +11,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useTheme } from "next-themes";
 
@@ -76,6 +77,16 @@ type CanvasProps<N extends CanvasNode = CanvasNode, E extends CanvasEdge = Canva
   onNodePositionChange?: (
     nodeId: string,
     position: NodePosition
+  ) => void;
+  onDeleteNodes?: (nodeIds: string[]) => void;
+  onDeleteEdge?: (edgeId: string) => void;
+  onConnect?: (connection: {
+    source: string;
+    target: string;
+  }) => void;
+  onReconnectEdgeTarget?: (
+    edgeId: string,
+    target: string
   ) => void;
 };
 
@@ -167,11 +178,14 @@ export function Canvas<
   children,
   onNodeClick,
   onNodePositionChange,
+  onDeleteNodes,
+  onDeleteEdge,
+  onConnect,
+  onReconnectEdgeTarget,
 }: CanvasProps<N, E>) {
   const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const suppressClickRef = useRef<string | null>(null);
-  const [themeReady, setThemeReady] = useState(false);
   const pointerStateRef = useRef<
     | {
         mode: "pan";
@@ -189,6 +203,33 @@ export function Canvas<
         startPosition: NodePosition;
         moved: boolean;
       }
+    | {
+        mode: "select";
+        pointerId: number;
+        startClientX: number;
+        startClientY: number;
+        currentClientX: number;
+        currentClientY: number;
+      }
+    | {
+        mode: "connect";
+        pointerId: number;
+        sourceNodeId: string;
+        startClientX: number;
+        startClientY: number;
+        currentClientX: number;
+        currentClientY: number;
+      }
+    | {
+        mode: "reconnect-edge";
+        pointerId: number;
+        edgeId: string;
+        sourceNodeId: string;
+        startClientX: number;
+        startClientY: number;
+        currentClientX: number;
+        currentClientY: number;
+      }
     | null
   >(null);
   const zoomTransitionTimeoutRef =
@@ -198,10 +239,28 @@ export function Canvas<
     y: 80,
     zoom: 1,
   });
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedEdgeId, setSelectedEdgeId] =
+    useState<string | null>(null);
   const [viewportLocked, setViewportLocked] = useState(false);
   const [isZoomTransitioning, setIsZoomTransitioning] =
     useState(false);
+  const [selectionRect, setSelectionRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [connectionPreview, setConnectionPreview] = useState<{
+    sourceNodeId: string;
+    edgeId?: string;
+    sourceX: number;
+    sourceY: number;
+    targetX: number;
+    targetY: number;
+  } | null>(null);
+  const [hoveredTargetNodeId, setHoveredTargetNodeId] =
+    useState<string | null>(null);
   const [containerSize, setContainerSize] = useState({
     width: 0,
     height: 0,
@@ -298,10 +357,11 @@ export function Canvas<
 
   const activeViewport =
     fitView && !viewportLocked ? autoViewport : viewport;
-
-  useEffect(() => {
-    setThemeReady(true);
-  }, []);
+  const themeReady = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   const activeColorMode =
     themeReady &&
@@ -341,9 +401,152 @@ export function Canvas<
     }>;
   }, [edges, measurements, nodes]);
 
+  const nodeBounds = useMemo(() => {
+    return nodes.map((node) => {
+      const size =
+        measurements.get(node.id) || DEFAULT_NODE_SIZE;
+
+      return {
+        id: node.id,
+        left: node.position.x,
+        top: node.position.y,
+        right: node.position.x + size.width,
+        bottom: node.position.y + size.height,
+        handles: node.data as {
+          handles?: {
+            source?: boolean;
+            target?: boolean;
+          };
+        },
+      };
+    });
+  }, [measurements, nodes]);
+
+  const connectionPreviewPath = useMemo(() => {
+    if (!connectionPreview) return null;
+
+    const sourceNode = nodeBounds.find(
+      (node) => node.id === connectionPreview.sourceNodeId
+    );
+
+    if (!sourceNode) return null;
+
+    return getBezierPath({
+      sourceX: sourceNode.right,
+      sourceY: (sourceNode.top + sourceNode.bottom) / 2,
+      targetX: connectionPreview.targetX,
+      targetY: connectionPreview.targetY,
+    });
+  }, [connectionPreview, nodeBounds]);
+
+  const getTargetNodeAtClientPosition = useCallback(
+    (clientX: number, clientY: number) => {
+      const element = containerRef.current;
+      if (!element) return null;
+
+      const rect = element.getBoundingClientRect();
+      const worldX =
+        (clientX - rect.left - activeViewport.x) /
+        activeViewport.zoom;
+      const worldY =
+        (clientY - rect.top - activeViewport.y) /
+        activeViewport.zoom;
+
+      return (
+        nodeBounds.find((node) => {
+          const hasTarget =
+            node.handles.handles?.target !== false;
+
+          if (!hasTarget) return false;
+
+          const handleX = node.left;
+          const handleY = (node.top + node.bottom) / 2;
+
+          return (
+            Math.abs(worldX - handleX) <= 18 &&
+            Math.abs(worldY - handleY) <= 18
+          );
+        }) || null
+      );
+    },
+    [activeViewport, nodeBounds]
+  );
+
+  const updateSelectionFromRect = useCallback(
+    (
+      startClientX: number,
+      startClientY: number,
+      currentClientX: number,
+      currentClientY: number
+    ) => {
+      const element = containerRef.current;
+      if (!element) return;
+
+      const rect = element.getBoundingClientRect();
+      const left = Math.min(startClientX, currentClientX) - rect.left;
+      const top = Math.min(startClientY, currentClientY) - rect.top;
+      const width = Math.abs(currentClientX - startClientX);
+      const height = Math.abs(currentClientY - startClientY);
+
+      setSelectionRect({
+        left,
+        top,
+        width,
+        height,
+      });
+
+      const worldLeft =
+        (left - activeViewport.x) / activeViewport.zoom;
+      const worldTop =
+        (top - activeViewport.y) / activeViewport.zoom;
+      const worldRight =
+        (left + width - activeViewport.x) / activeViewport.zoom;
+      const worldBottom =
+        (top + height - activeViewport.y) / activeViewport.zoom;
+
+      setSelectedNodeIds(
+        nodeBounds
+          .filter(
+            (node) =>
+              node.left < worldRight &&
+              node.right > worldLeft &&
+              node.top < worldBottom &&
+              node.bottom > worldTop
+          )
+          .map((node) => node.id)
+      );
+    },
+    [activeViewport, nodeBounds]
+  );
+
   const handleBackgroundPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.target !== event.currentTarget) return;
+
+      if (event.shiftKey) {
+        pointerStateRef.current = {
+          mode: "select",
+          pointerId: event.pointerId,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          currentClientX: event.clientX,
+          currentClientY: event.clientY,
+        };
+
+        setSelectionRect({
+          left: event.nativeEvent.offsetX,
+          top: event.nativeEvent.offsetY,
+          width: 0,
+          height: 0,
+        });
+        setSelectedNodeIds([]);
+        setSelectedEdgeId(null);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
+
+      setSelectedNodeIds([]);
+      setSelectedEdgeId(null);
 
       pointerStateRef.current = {
         mode: "pan",
@@ -364,6 +567,112 @@ export function Canvas<
       const pointerState = pointerStateRef.current;
 
       if (!pointerState || pointerState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      if (pointerState.mode === "select") {
+        pointerStateRef.current = {
+          ...pointerState,
+          currentClientX: event.clientX,
+          currentClientY: event.clientY,
+        };
+
+        updateSelectionFromRect(
+          pointerState.startClientX,
+          pointerState.startClientY,
+          event.clientX,
+          event.clientY
+        );
+        return;
+      }
+
+      if (pointerState.mode === "connect") {
+        const targetNode = getTargetNodeAtClientPosition(
+          event.clientX,
+          event.clientY
+        );
+
+        pointerStateRef.current = {
+          ...pointerState,
+          currentClientX: event.clientX,
+          currentClientY: event.clientY,
+        };
+
+        setHoveredTargetNodeId(targetNode?.id || null);
+
+        if (targetNode) {
+          setConnectionPreview({
+            sourceNodeId: pointerState.sourceNodeId,
+            sourceX: 0,
+            sourceY: 0,
+            targetX: targetNode.left,
+            targetY:
+              (targetNode.top + targetNode.bottom) / 2,
+          });
+          return;
+        }
+
+        const element = containerRef.current;
+        if (!element) return;
+
+        const rect = element.getBoundingClientRect();
+        setConnectionPreview({
+          sourceNodeId: pointerState.sourceNodeId,
+          sourceX: 0,
+          sourceY: 0,
+          targetX:
+            (event.clientX - rect.left - activeViewport.x) /
+            activeViewport.zoom,
+          targetY:
+            (event.clientY - rect.top - activeViewport.y) /
+            activeViewport.zoom,
+        });
+        return;
+      }
+
+      if (pointerState.mode === "reconnect-edge") {
+        const targetNode = getTargetNodeAtClientPosition(
+          event.clientX,
+          event.clientY
+        );
+
+        pointerStateRef.current = {
+          ...pointerState,
+          currentClientX: event.clientX,
+          currentClientY: event.clientY,
+        };
+
+        setHoveredTargetNodeId(targetNode?.id || null);
+
+        if (targetNode) {
+          setConnectionPreview({
+            edgeId: pointerState.edgeId,
+            sourceNodeId: pointerState.sourceNodeId,
+            sourceX: 0,
+            sourceY: 0,
+            targetX: targetNode.left,
+            targetY:
+              (targetNode.top + targetNode.bottom) / 2,
+          });
+          return;
+        }
+
+        const element = containerRef.current;
+        if (!element) return;
+
+        const rect = element.getBoundingClientRect();
+        setConnectionPreview({
+          edgeId: pointerState.edgeId,
+          sourceNodeId: pointerState.sourceNodeId,
+          sourceX: 0,
+          sourceY: 0,
+          targetX:
+            (event.clientX - rect.left - activeViewport.x) /
+            activeViewport.zoom,
+          targetY:
+            (event.clientY - rect.top - activeViewport.y) /
+            activeViewport.zoom,
+        });
         return;
       }
 
@@ -398,7 +707,14 @@ export function Canvas<
         y: pointerState.startPosition.y + deltaY,
       });
     },
-    [activeViewport.zoom, onNodePositionChange]
+    [
+      activeViewport.x,
+      activeViewport.y,
+      activeViewport.zoom,
+      getTargetNodeAtClientPosition,
+      onNodePositionChange,
+      updateSelectionFromRect,
+    ]
   );
 
   const clearPointerState = useCallback(() => {
@@ -413,6 +729,69 @@ export function Canvas<
         return;
       }
 
+      if (pointerState.mode === "select") {
+        updateSelectionFromRect(
+          pointerState.startClientX,
+          pointerState.startClientY,
+          pointerState.currentClientX,
+          pointerState.currentClientY
+        );
+        setSelectionRect(null);
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        clearPointerState();
+        return;
+      }
+
+      if (pointerState.mode === "connect") {
+        const targetNode = getTargetNodeAtClientPosition(
+          pointerState.currentClientX,
+          pointerState.currentClientY
+        );
+
+        if (
+          targetNode &&
+          targetNode.id !== pointerState.sourceNodeId
+        ) {
+          onConnect?.({
+            source: pointerState.sourceNodeId,
+            target: targetNode.id,
+          });
+        }
+
+        setHoveredTargetNodeId(null);
+        setConnectionPreview(null);
+        event.currentTarget.releasePointerCapture(
+          event.pointerId
+        );
+        clearPointerState();
+        return;
+      }
+
+      if (pointerState.mode === "reconnect-edge") {
+        const targetNode = getTargetNodeAtClientPosition(
+          pointerState.currentClientX,
+          pointerState.currentClientY
+        );
+
+        if (
+          targetNode &&
+          targetNode.id !== pointerState.sourceNodeId
+        ) {
+          onReconnectEdgeTarget?.(
+            pointerState.edgeId,
+            targetNode.id
+          );
+        }
+
+        setHoveredTargetNodeId(null);
+        setConnectionPreview(null);
+        event.currentTarget.releasePointerCapture(
+          event.pointerId
+        );
+        clearPointerState();
+        return;
+      }
+
       if (pointerState.mode === "drag" && pointerState.moved) {
         suppressClickRef.current = pointerState.nodeId;
       }
@@ -420,7 +799,13 @@ export function Canvas<
       event.currentTarget.releasePointerCapture(event.pointerId);
       clearPointerState();
     },
-    [clearPointerState]
+    [
+      clearPointerState,
+      getTargetNodeAtClientPosition,
+      onConnect,
+      onReconnectEdgeTarget,
+      updateSelectionFromRect,
+    ]
   );
 
   const handleWheel = useCallback(
@@ -480,6 +865,46 @@ export function Canvas<
     };
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Backspace" &&
+        event.key !== "Delete"
+      ) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      if (selectedEdgeId) {
+        event.preventDefault();
+        onDeleteEdge?.(selectedEdgeId);
+        setSelectedEdgeId(null);
+        return;
+      }
+
+      if (selectedNodeIds.length === 0) return;
+
+      event.preventDefault();
+      onDeleteNodes?.(selectedNodeIds);
+      setSelectedNodeIds([]);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onDeleteEdge, onDeleteNodes, selectedEdgeId, selectedNodeIds]);
+
   return (
     <div
       ref={containerRef}
@@ -502,6 +927,18 @@ export function Canvas<
         ...style,
       }}
     >
+      {selectionRect ? (
+        <div
+          className="pointer-events-none absolute border border-primary/40 bg-primary/10"
+          style={{
+            left: selectionRect.left,
+            top: selectionRect.top,
+            width: selectionRect.width,
+            height: selectionRect.height,
+            zIndex: 20,
+          }}
+        />
+      ) : null}
       <div
         style={{
           position: "absolute",
@@ -549,49 +986,140 @@ export function Canvas<
             position: "absolute",
             inset: 0,
             overflow: "visible",
-            pointerEvents: "none",
+            pointerEvents: "auto",
           }}
         >
           {edgeGeometry.map(({ edge, sourceX, sourceY, targetX, targetY }) => {
             const EdgeComponent = edgeTypes[edge.type || "animated"];
-
-            if (EdgeComponent) {
-              return (
-                <EdgeComponent
-                  id={edge.id}
-                  key={edge.id}
-                  label={edge.label}
-                  sourceX={sourceX}
-                  sourceY={sourceY}
-                  targetX={targetX}
-                  targetY={targetY}
-                />
-              );
-            }
-
             const path = getBezierPath({
               sourceX,
               sourceY,
               targetX,
               targetY,
             });
+            const isSelected = selectedEdgeId === edge.id;
+
+            if (EdgeComponent) {
+              return (
+                <g key={edge.id}>
+                  <EdgeComponent
+                    id={edge.id}
+                    label={edge.label}
+                    sourceX={sourceX}
+                    sourceY={sourceY}
+                    targetX={targetX}
+                    targetY={targetY}
+                    selected={isSelected}
+                  />
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={16}
+                    style={{
+                      pointerEvents: "stroke",
+                      cursor: "pointer",
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedNodeIds([]);
+                      setSelectedEdgeId(edge.id);
+                    }}
+                  />
+                  {isSelected ? (
+                    <circle
+                      cx={targetX}
+                      cy={targetY}
+                      r={8}
+                      fill="var(--background)"
+                      stroke="currentColor"
+                      strokeOpacity={0.5}
+                      strokeWidth={1.5}
+                      style={{
+                        pointerEvents: "all",
+                        cursor: "grab",
+                      }}
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+
+                        pointerStateRef.current = {
+                          mode: "reconnect-edge",
+                          pointerId: event.pointerId,
+                          edgeId: edge.id,
+                          sourceNodeId: edge.source,
+                          startClientX: event.clientX,
+                          startClientY: event.clientY,
+                          currentClientX: event.clientX,
+                          currentClientY: event.clientY,
+                        };
+
+                        setConnectionPreview({
+                          edgeId: edge.id,
+                          sourceNodeId: edge.source,
+                          sourceX,
+                          sourceY,
+                          targetX,
+                          targetY,
+                        });
+                        setHoveredTargetNodeId(null);
+                        (
+                          event.currentTarget as SVGCircleElement
+                        ).setPointerCapture(event.pointerId);
+                      }}
+                    />
+                  ) : null}
+                </g>
+              );
+            }
 
             return (
-              <path
-                key={edge.id}
-                d={path}
-                fill="none"
-                stroke="currentColor"
-                strokeOpacity={0.35}
-                strokeWidth={1.5}
-              />
+              <g key={edge.id}>
+                <path
+                  d={path}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeOpacity={0.35}
+                  strokeWidth={1.5}
+                />
+                <path
+                  d={path}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={16}
+                  style={{
+                    pointerEvents: "stroke",
+                    cursor: "pointer",
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedNodeIds([]);
+                    setSelectedEdgeId(edge.id);
+                  }}
+                />
+              </g>
             );
           })}
+          {connectionPreviewPath ? (
+            <path
+              d={connectionPreviewPath}
+              fill="none"
+              stroke="currentColor"
+              strokeDasharray="6 6"
+              strokeOpacity={0.6}
+              strokeWidth={1.5}
+            />
+          ) : null}
         </svg>
 
         {nodes.map((node) => {
           const NodeComponent = nodeTypes[node.type];
           if (!NodeComponent) return null;
+          const nodeHandles = (node.data as {
+            handles?: {
+              target?: boolean;
+              source?: boolean;
+            };
+          }).handles;
 
           return (
             <div
@@ -618,8 +1146,25 @@ export function Canvas<
                   return;
                 }
 
-                setSelectedNodeId(node.id);
-                onNodeClick?.(event, node);
+                const multiSelect =
+                  event.shiftKey ||
+                  event.metaKey ||
+                  event.ctrlKey;
+
+                setSelectedNodeIds((prev) => {
+                  if (multiSelect) {
+                    return prev.includes(node.id)
+                      ? prev.filter((id) => id !== node.id)
+                      : [...prev, node.id];
+                  }
+
+                  return [node.id];
+                });
+                setSelectedEdgeId(null);
+
+                if (!multiSelect) {
+                  onNodeClick?.(event, node);
+                }
               }}
               style={{
                 position: "absolute",
@@ -629,10 +1174,69 @@ export function Canvas<
                 willChange: "transform",
               }}
             >
+              {nodeHandles?.target ? (
+                <button
+                  type="button"
+                  aria-label={`Target handle for ${node.id}`}
+                  className="absolute left-0 top-1/2 z-20 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent"
+                  onPointerUp={(event) => {
+                    event.stopPropagation();
+                  }}
+                />
+              ) : null}
+              {nodeHandles?.source ? (
+                <button
+                  type="button"
+                  aria-label={`Source handle for ${node.id}`}
+                  className="absolute right-0 top-1/2 z-20 h-5 w-5 translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent"
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+
+                    pointerStateRef.current = {
+                      mode: "connect",
+                      pointerId: event.pointerId,
+                      sourceNodeId: node.id,
+                      startClientX: event.clientX,
+                      startClientY: event.clientY,
+                      currentClientX: event.clientX,
+                      currentClientY: event.clientY,
+                    };
+
+                    setConnectionPreview({
+                      sourceNodeId: node.id,
+                      sourceX:
+                        node.position.x +
+                        (measurements.get(node.id)?.width ||
+                          DEFAULT_NODE_SIZE.width),
+                      sourceY:
+                        node.position.y +
+                        (measurements.get(node.id)?.height ||
+                          DEFAULT_NODE_SIZE.height) /
+                          2,
+                      targetX:
+                        node.position.x +
+                        (measurements.get(node.id)?.width ||
+                          DEFAULT_NODE_SIZE.width),
+                      targetY:
+                        node.position.y +
+                        (measurements.get(node.id)?.height ||
+                          DEFAULT_NODE_SIZE.height) /
+                          2,
+                    });
+                    setHoveredTargetNodeId(null);
+                    event.currentTarget.setPointerCapture(
+                      event.pointerId
+                    );
+                  }}
+                />
+              ) : null}
               <NodeComponent
                 data={node.data}
-                selected={selectedNodeId === node.id}
+                selected={selectedNodeIds.includes(node.id)}
               />
+              {hoveredTargetNodeId === node.id ? (
+                <span className="pointer-events-none absolute left-0 top-1/2 z-30 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-primary/15" />
+              ) : null}
             </div>
           );
         })}

@@ -16,12 +16,20 @@ export type NodeProps = ComponentProps<typeof Card> & {
     target: boolean;
     source: boolean;
   };
+  selected?: boolean;
 };
 
-export const Node = ({ handles, className, ...props }: NodeProps) => (
+export const Node = ({
+  handles,
+  className,
+  selected = false,
+  ...props
+}: NodeProps) => (
   <Card
     className={cn(
-      "node-container relative size-full h-auto w-sm gap-0 rounded-md p-0",
+      "node-container relative size-full h-auto w-sm gap-0 rounded-md p-0 transition-[box-shadow,border-color] duration-150",
+      selected &&
+        "border-primary shadow-[0_0_0_2px_color-mix(in_oklab,var(--primary)_30%,transparent)]",
       className
     )}
     {...props}
