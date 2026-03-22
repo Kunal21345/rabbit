@@ -101,7 +101,7 @@ export function useWorkflowGraph(
             ? buildNextNodePosition(last)
             : { x: 250, y: 100 },
           data: {
-            label: `Question ${prev.length}`,
+            label: `Step ${prev.length}`,
             description: "",
             businessRule: "",
             aiRuleDefinition: "",

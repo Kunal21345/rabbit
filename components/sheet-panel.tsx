@@ -68,7 +68,7 @@ type FieldSchema = {
 const MAIN_FIELDS: FieldSchema[] = [
   {
     key: "description",
-    label: "Question Description",
+    label: "Step Description",
     type: "textarea",
   },
   {
