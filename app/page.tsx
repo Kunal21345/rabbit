@@ -11,6 +11,7 @@ import {
 import { Header } from "@/components/header";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
+import { WorkflowPromptBox } from "@/components/workflow-prompt-box";
 
 import {
   Node as CustomNode,
@@ -33,6 +34,7 @@ import {
 
 import { useDebounce } from "@/hooks/useDebounce";
 import { previewWorkflow } from "@/lib/workflow-preview";
+import type { WorkflowGenerationModel } from "@/lib/workflow-generation";
 
 /* ====================================================== */
 
@@ -298,6 +300,10 @@ export default function WorkflowBuilder() {
     useState<string | null>(null);
   const [sheetOpen, setSheetOpen] =
     useState(false);
+  const [generationError, setGenerationError] =
+    useState<string | null>(null);
+  const [isGeneratingWorkflow, setIsGeneratingWorkflow] =
+    useState(false);
   const persistedGraph = useDebounce(
     { nodes, edges },
     800
@@ -342,6 +348,47 @@ export default function WorkflowBuilder() {
       JSON.stringify(persistedGraph)
     );
   }, [persistedGraph, hydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkWorkflowGenerationConfig() {
+      try {
+        const response = await fetch(
+          "/api/workflow/generate",
+          {
+            method: "GET",
+          }
+        );
+
+        const payload = await response.json();
+
+        if (cancelled) return;
+
+        if (!response.ok) {
+          setGenerationError(
+            payload.error ||
+              "Workflow generation is not configured."
+          );
+          return;
+        }
+
+        setGenerationError(null);
+      } catch {
+        if (!cancelled) {
+          setGenerationError(
+            "Unable to reach workflow generation backend."
+          );
+        }
+      }
+    }
+
+    checkWorkflowGenerationConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /* ====================================================== */
   /* Derived */
@@ -496,6 +543,71 @@ export default function WorkflowBuilder() {
     window.open("/preview", "_blank");
   }, [nodes, edges]);
 
+  const handlePromptSubmit = useCallback(
+    async (
+      prompt: string,
+      model: WorkflowGenerationModel
+    ) => {
+      setGenerationError(null);
+      setIsGeneratingWorkflow(true);
+
+      try {
+        const response = await fetch(
+          "/api/workflow/generate",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              prompt,
+              model,
+              currentGraph: {
+                nodes: nodes.map((node) => ({
+                  id: node.id,
+                  label: node.data.label,
+                  description:
+                    node.data.description,
+                  businessRule:
+                    node.data.businessRule,
+                })),
+                edges: edges.map((edge) => ({
+                  source: edge.source,
+                  target: edge.target,
+                  label: edge.label,
+                })),
+              },
+            }),
+          }
+        );
+
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            payload.details ||
+              payload.error ||
+              "Failed to generate workflow."
+          );
+        }
+
+        setNodes(payload.graph.nodes);
+        setEdges(payload.graph.edges);
+        setSelectedNodeId(null);
+        setSheetOpen(false);
+      } catch (error) {
+        setGenerationError(
+          error instanceof Error
+            ? error.message
+            : "Failed to generate workflow."
+        );
+      } finally {
+        setIsGeneratingWorkflow(false);
+      }
+    },
+    [edges, nodes, setEdges, setNodes]
+  );
+
   /* ====================================================== */
   /* Render */
   /* ====================================================== */
@@ -506,7 +618,7 @@ export default function WorkflowBuilder() {
         <button onClick={handlePreview} className="px-4 py-2 border rounded">
           Preview
         </button>
-        <button onClick={addNode} className="px-4 py-2 border rounded">
+        <button onClick={() => addNode()} className="px-4 py-2 border rounded">
           Add Node
         </button>
         <ThemeToggle />
@@ -525,6 +637,12 @@ export default function WorkflowBuilder() {
         onConnect={connectEdge}
         onReconnectEdgeTarget={updateEdgeTarget}
         fitView
+      />
+
+      <WorkflowPromptBox
+        error={generationError}
+        loading={isGeneratingWorkflow}
+        onSubmit={handlePromptSubmit}
       />
 
       <NodeSheet

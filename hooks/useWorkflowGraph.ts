@@ -46,6 +46,12 @@ export type WorkflowConnection = {
   target: string;
 };
 
+type NewNodeSeed = Partial<
+  Omit<WorkflowNodeData, "handles"> & {
+    handles: Partial<WorkflowNodeData["handles"]>;
+  }
+>;
+
 /* ====================================================== */
 /* Helpers */
 /* ====================================================== */
@@ -86,11 +92,23 @@ export function useWorkflowGraph(
   /* Add Node */
   /* ====================================================== */
 
-  const addNode = useCallback(() => {
+  const addNode = useCallback((seed?: NewNodeSeed) => {
+    const id = `node-${Date.now()}`;
+
     setNodes((prev) => {
       const last = prev[prev.length - 1];
-
-      const id = `node-${Date.now()}`;
+      const defaultData: WorkflowNodeData = {
+        label: `Step ${prev.length}`,
+        description: "",
+        businessRule: "",
+        aiRuleDefinition: "",
+        aiTestRules: "",
+        comments: "",
+        handles: {
+          source: true,
+          target: true,
+        },
+      };
 
       return [
         ...prev,
@@ -101,20 +119,18 @@ export function useWorkflowGraph(
             ? buildNextNodePosition(last)
             : { x: 250, y: 100 },
           data: {
-            label: `Step ${prev.length}`,
-            description: "",
-            businessRule: "",
-            aiRuleDefinition: "",
-            aiTestRules: "",
-            comments: "",
+            ...defaultData,
+            ...seed,
             handles: {
-              source: true,
-              target: true,
+              ...defaultData.handles,
+              ...seed?.handles,
             },
           },
         },
       ];
     });
+
+    return id;
   }, []);
 
   /* ====================================================== */
