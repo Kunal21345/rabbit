@@ -31,9 +31,18 @@ const MODELS: Array<{
   label: string;
   value: WorkflowGenerationModel;
 }> = [
-  { label: "GPT-5", value: "gpt-5" },
-  { label: "GPT-5 Mini", value: "gpt-5-mini" },
-  { label: "o3", value: "o3" },
+  {
+    label: "GPT OSS 20B",
+    value: "openai/gpt-oss-20b",
+  },
+  {
+    label: "GPT OSS 120B",
+    value: "openai/gpt-oss-120b",
+  },
+  {
+    label: "Llama 3.3 70B",
+    value: "llama-3.3-70b-versatile",
+  },
 ];
 
 export function WorkflowPromptBox({
@@ -43,7 +52,9 @@ export function WorkflowPromptBox({
 }: WorkflowPromptBoxProps) {
   const [draft, setDraft] = useState("");
   const [model, setModel] =
-    useState<WorkflowGenerationModel>("gpt-5");
+    useState<WorkflowGenerationModel>(
+      "openai/gpt-oss-120b"
+    );
 
   const submitPrompt = useCallback(() => {
     const prompt = draft.trim();
@@ -95,7 +106,7 @@ export function WorkflowPromptBox({
               }
             >
                 <SelectTrigger
-                  className="h-8 w-[132px] rounded-full bg-none text-xs shadow-none"
+                  className="h-8 w-[178px] rounded-full bg-none text-xs shadow-none"
                   disabled={loading}
                 >
                   <SelectValue />

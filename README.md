@@ -2,7 +2,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Set your Groq API key in `.env.local`:
+
+```bash
+GROQ_API_KEY=your_groq_api_key_here
+```
+
+Then run the development server:
 
 ```bash
 npm run dev

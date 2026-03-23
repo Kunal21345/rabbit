@@ -10,9 +10,17 @@ import {
 
 export const runtime = "nodejs";
 
-const OPENAI_API_URL = "https://api.openai.com/v1/responses";
+const GROQ_API_URL =
+  "https://api.groq.com/openai/v1/chat/completions";
 const MISSING_API_KEY_MESSAGE =
-  "Missing OPENAI_API_KEY. Add it to .env.local and restart the dev server.";
+  "Missing GROQ_API_KEY. Add it to .env.local and restart the dev server.";
+
+function supportsStrictStructuredOutputs(model: string) {
+  return (
+    model === "openai/gpt-oss-20b" ||
+    model === "openai/gpt-oss-120b"
+  );
+}
 
 function buildPrompt(input: WorkflowGenerationRequest) {
   return [
@@ -41,17 +49,31 @@ function extractTextPayload(response: unknown) {
   if (
     response &&
     typeof response === "object" &&
-    "output_text" in response &&
-    typeof response.output_text === "string"
+    "choices" in response &&
+    Array.isArray(response.choices)
   ) {
-    return response.output_text;
+    const [choice] = response.choices;
+
+    if (
+      choice &&
+      typeof choice === "object" &&
+      "message" in choice &&
+      choice.message &&
+      typeof choice.message === "object" &&
+      "content" in choice.message &&
+      typeof choice.message.content === "string"
+    ) {
+      return choice.message.content;
+    }
   }
 
-  throw new Error("OpenAI response did not include output_text");
+  throw new Error(
+    "Groq response did not include assistant message content"
+  );
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
 
   if (!apiKey) {
     return NextResponse.json(
@@ -85,7 +107,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const response = await fetch(OPENAI_API_URL, {
+    const response = await fetch(GROQ_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -93,34 +115,32 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: payload.model,
-        input: [
+        messages: [
           {
             role: "system",
-            content: [
-              {
-                type: "input_text",
-                text: "You are a workflow architect. Return only valid JSON matching the supplied schema.",
-              },
-            ],
+            content:
+              "You are a workflow architect. Return only valid JSON matching the supplied schema.",
           },
           {
             role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: buildPrompt(payload),
-              },
-            ],
+            content: buildPrompt(payload),
           },
         ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "workflow_graph",
-            schema: WORKFLOW_GENERATION_SCHEMA,
-            strict: true,
-          },
+        response_format: {
+          ...(supportsStrictStructuredOutputs(payload.model)
+            ? {
+                type: "json_schema",
+                json_schema: {
+                  name: "workflow_graph",
+                  strict: true,
+                  schema: WORKFLOW_GENERATION_SCHEMA,
+                },
+              }
+            : {
+                type: "json_object",
+              }),
         },
+        temperature: 0.2,
       }),
     });
 
@@ -129,7 +149,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json(
         {
-          error: "OpenAI request failed.",
+          error: "Groq request failed.",
           details: errorText,
         },
         { status: 502 }
@@ -162,7 +182,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const configured = Boolean(process.env.OPENAI_API_KEY);
+  const configured = Boolean(process.env.GROQ_API_KEY);
 
   return NextResponse.json(
     configured

@@ -5,9 +5,9 @@ import type {
 } from "@/hooks/useWorkflowGraph";
 
 export type WorkflowGenerationModel =
-  | "gpt-5"
-  | "gpt-5-mini"
-  | "o3";
+  | "openai/gpt-oss-20b"
+  | "openai/gpt-oss-120b"
+  | "llama-3.3-70b-versatile";
 
 export type WorkflowGenerationRequest = {
   prompt: string;
