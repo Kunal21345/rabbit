@@ -33,7 +33,6 @@ import {
 } from "@/hooks/useWorkflowGraph";
 
 import { useDebounce } from "@/hooks/useDebounce";
-import { previewWorkflow } from "@/lib/workflow-preview";
 import type { WorkflowGenerationModel } from "@/lib/workflow-generation";
 
 /* ====================================================== */
@@ -275,6 +274,7 @@ const edgeTypes = {
   animated: CustomEdge.Animated,
   temporary: CustomEdge.Temporary,
 };
+
 
 /* ====================================================== */
 /* Page */
@@ -533,16 +533,6 @@ export default function WorkflowBuilder() {
     [updateNode, setEdges]
   );
 
-  /* ====================================================== */
-  /* Preview */
-  /* ====================================================== */
-
-  const handlePreview = useCallback(() => {
-    previewWorkflow(nodes, edges);
-
-    window.open("/preview", "_blank");
-  }, [nodes, edges]);
-
   const handlePromptSubmit = useCallback(
     async (
       prompt: string,
@@ -611,15 +601,25 @@ export default function WorkflowBuilder() {
   /* ====================================================== */
   /* Render */
   /* ====================================================== */
+  /* ====================clear graph================================== */
+const handleClearGraph = useCallback(() => {
+  setNodes(initialNodes);
+  setEdges(initialEdges);
+  setSelectedNodeId(null);
+  setSheetOpen(false);
+  setGenerationError(null);
+  localStorage.removeItem(STORAGE_KEY);
+},[setNodes, setEdges]);
+
 
   return (
     <div className="w-full h-screen relative">
       <Header>
-        <button onClick={handlePreview} className="px-4 py-2 border rounded">
-          Preview
-        </button>
         <button onClick={() => addNode()} className="px-4 py-2 border rounded">
           Add Node
+        </button>
+        <button onClick={handleClearGraph} className="px-4 py-2 border rounded">
+          Clear
         </button>
         <ThemeToggle />
 
