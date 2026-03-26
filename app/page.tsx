@@ -8,6 +8,7 @@ import {
   useState,
   type MouseEvent,
 } from "react";
+import dagre from "dagre";
 import { Header } from "@/components/header";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
@@ -45,15 +46,7 @@ type NodeSheetPayload = {
   aiRuleDefinition: string;
   aiTestRules: string;
   comments: string;
-  yesCondition: string;
-  yesNextNodeId: string;
-  noCondition: string;
-  noNextNodeId: string;
-};
-
-type EdgeBucket = {
-  yes?: WorkflowEdge;
-  no?: WorkflowEdge;
+  nextNodeIds: string[];
 };
 
 /* ====================================================== */
@@ -77,11 +70,11 @@ const initialNodes: WorkflowNode[] = [
     },
   },
   {
-    id: "review",
+    id: "Sample Node",
     type: "workflow",
     position: { x: 600, y: -300 },
     data: {
-      label: "Review",
+      label: "Sample Node",
       description: "Evaluate the workflow input",
       businessRule: "",
       aiRuleDefinition: "",
@@ -94,11 +87,11 @@ const initialNodes: WorkflowNode[] = [
     },
   },
   {
-    id: "end",
+    id: "Sample Node 2",
     type: "workflow",
     position: { x: 600, y: 300 },
     data: {
-      label: "End",
+      label: "Sample Node 2",
       description: "Complete the workflow",
       businessRule: "",
       aiRuleDefinition: "",
@@ -114,18 +107,14 @@ const initialNodes: WorkflowNode[] = [
 
 const initialEdges: WorkflowEdge[] = [
   {
-    id: "start-review",
+    id: "start-sample-node",
     source: "start",
-    target: "review",
-    label: "YES",
-    type: "animated",
+    target: "Sample Node",
   },
   {
-    id: "start-end",
+    id: "start-sample-node-2",
     source: "start",
-    target: "end",
-    label: "NO",
-    type: "temporary",
+    target: "Sample Node 2",
   },
 ];
 
@@ -151,60 +140,136 @@ const STORAGE_KEY = `workflow-graph-${hashSeedGraph(
 /* ====================================================== */
 
 function buildEdgeMap(edges: WorkflowEdge[]) {
-  const result = new Map<string, EdgeBucket>();
+  const result = new Map<string, WorkflowEdge[]>();
 
   edges.forEach((edge) => {
-    const bucket = result.get(edge.source) || {};
-
-    if (edge.label === "NO") {
-      bucket.no = edge;
-    } else {
-      bucket.yes = edge;
-    }
-
-    result.set(edge.source, bucket);
+    const existing = result.get(edge.source) || [];
+    result.set(edge.source, [...existing, edge]);
   });
 
   return result;
 }
 
-function createEdge(
-  source: string,
-  target: string,
-  label: string
-): WorkflowEdge {
-  return {
-    id: `${source}-${target}`,
-    source,
-    target,
-    label,
-    type: label === "YES" ? "animated" : "temporary",
-  };
-}
+const LAYOUT_NODE_WIDTH = 320;
+const LAYOUT_NODE_HEIGHT = 144;
+const CHILD_VERTICAL_GAP = 96;
 
-function replaceEdge(
-  edges: WorkflowEdge[],
-  source: string,
-  index: 0 | 1,
-  target: string,
-  label: string
-): WorkflowEdge[] {
-  const sourceEdges = edges.filter(
-    (e) => e.source === source
+function layoutNodePositions(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[]
+) {
+  const graph = new dagre.graphlib.Graph();
+
+  graph.setGraph({
+    rankdir: "LR",
+    align: "UL",
+    nodesep: 120,
+    ranksep: 160,
+    marginx: 60,
+    marginy: 60,
+  });
+  graph.setDefaultEdgeLabel(() => ({}));
+
+  nodes.forEach((node) => {
+    graph.setNode(node.id, {
+      width: LAYOUT_NODE_WIDTH,
+      height: LAYOUT_NODE_HEIGHT,
+    });
+  });
+
+  edges.forEach((edge) => {
+    graph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(graph);
+
+  const centerPositions = new Map<string, { x: number; y: number }>(
+    nodes.map((node) => {
+      const layoutNode = graph.node(node.id) as
+        | { x: number; y: number }
+        | undefined;
+
+      if (!layoutNode) {
+        return [
+          node.id,
+          {
+            x: node.position.x + LAYOUT_NODE_WIDTH / 2,
+            y: node.position.y + LAYOUT_NODE_HEIGHT / 2,
+          },
+        ] as const;
+      }
+
+      return [
+        node.id,
+        {
+          x: layoutNode.x,
+          y: layoutNode.y,
+        },
+      ] as const;
+    })
   );
 
-  const otherEdges = edges.filter(
-    (e) => e.source !== source
+  const incomingCount = new Map<string, number>();
+  edges.forEach((edge) => {
+    incomingCount.set(
+      edge.target,
+      (incomingCount.get(edge.target) || 0) + 1
+    );
+  });
+
+  const childrenBySource = new Map<string, string[]>();
+  edges.forEach((edge) => {
+    const children = childrenBySource.get(edge.source) || [];
+    children.push(edge.target);
+    childrenBySource.set(edge.source, children);
+  });
+
+  childrenBySource.forEach((children, sourceId) => {
+    const sourcePosition = centerPositions.get(sourceId);
+    if (!sourcePosition || children.length <= 1) return;
+
+    const uniqueChildren = [...new Set(children)].filter(
+      (childId) => (incomingCount.get(childId) || 0) <= 1
+    );
+
+    if (uniqueChildren.length <= 1) return;
+
+    uniqueChildren.sort((a, b) => {
+      const ay = centerPositions.get(a)?.y || 0;
+      const by = centerPositions.get(b)?.y || 0;
+      return ay - by;
+    });
+
+    const spacing = LAYOUT_NODE_HEIGHT + CHILD_VERTICAL_GAP;
+    const totalSpan = (uniqueChildren.length - 1) * spacing;
+    const startY = sourcePosition.y - totalSpan / 2;
+
+    uniqueChildren.forEach((childId, index) => {
+      const current = centerPositions.get(childId);
+      if (!current) return;
+
+      centerPositions.set(childId, {
+        x: current.x,
+        y: startY + index * spacing,
+      });
+    });
+  });
+
+  return new Map(
+    nodes.map((node) => {
+      const center = centerPositions.get(node.id);
+
+      if (!center) return [node.id, node.position] as const;
+
+      return [
+        node.id,
+        {
+          x: center.x - LAYOUT_NODE_WIDTH / 2,
+          y: center.y - LAYOUT_NODE_HEIGHT / 2,
+        },
+      ] as const;
+    })
   );
-
-  sourceEdges[index] = target
-    ? createEdge(source, target, label)
-    : undefined!;
-
-  return [
-    ...otherEdges,
-    ...sourceEdges.filter(Boolean),
-  ];
 }
 
 /* ====================================================== */
@@ -217,7 +282,7 @@ const WorkflowNodeRenderer = memo(
     selected,
   }: {
     data: WorkflowNodeData & {
-      edge?: EdgeBucket;
+      edges?: WorkflowEdge[];
       nodeLabelMap?: Map<string, string>;
       hidden?: boolean;
     };
@@ -242,23 +307,17 @@ const WorkflowNodeRenderer = memo(
 
         <NodeFooter>
           <div className="text-xs space-y-1">
-            <p>
-              YES →{" "}
-              {data.edge?.yes?.target
-                ? data.nodeLabelMap?.get(
-                    data.edge.yes.target
-                  )
-                : "pending"}
-            </p>
-
-            <p>
-              NO →{" "}
-              {data.edge?.no?.target
-                ? data.nodeLabelMap?.get(
-                    data.edge.no.target
-                  )
-                : "pending"}
-            </p>
+            {(data.edges?.length || 0) > 0 ? (
+              data.edges?.map((edge) => (
+                <p key={edge.id}>
+                  Next:{" "}
+                  {data.nodeLabelMap?.get(edge.target) ||
+                    edge.target}
+                </p>
+              ))
+            ) : (
+              <p>Next: pending</p>
+            )}
           </div>
         </NodeFooter>
       </CustomNode>
@@ -271,8 +330,7 @@ const nodeTypes = {
 };
 
 const edgeTypes = {
-  animated: CustomEdge.Animated,
-  temporary: CustomEdge.Temporary,
+  animated: CustomEdge.Default,
 };
 
 
@@ -349,6 +407,53 @@ export default function WorkflowBuilder() {
     );
   }, [persistedGraph, hydrated]);
 
+  const graphTopologyKey = useMemo(() => {
+    const nodeIds = nodes
+      .map((node) => node.id)
+      .sort()
+      .join("|");
+    const edgeIds = edges
+      .map((edge) => `${edge.source}->${edge.target}`)
+      .sort()
+      .join("|");
+
+    return `${nodeIds}::${edgeIds}`;
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    setNodes((previousNodes) => {
+      const nextPositions = layoutNodePositions(
+        previousNodes,
+        edges
+      );
+
+      const changed = previousNodes.some((node) => {
+        const next = nextPositions.get(node.id);
+
+        if (!next) return false;
+
+        return (
+          Math.abs(next.x - node.position.x) > 0.5 ||
+          Math.abs(next.y - node.position.y) > 0.5
+        );
+      });
+
+      if (!changed) return previousNodes;
+
+      return previousNodes.map((node) => {
+        const next = nextPositions.get(node.id);
+        if (!next) return node;
+
+        return {
+          ...node,
+          position: next,
+        };
+      });
+    });
+  }, [edges, graphTopologyKey, hydrated, setNodes]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -413,7 +518,7 @@ export default function WorkflowBuilder() {
       ...node,
       data: {
         ...node.data,
-        edge: edgeMap.get(node.id),
+        edges: edgeMap.get(node.id),
         nodeLabelMap,
       },
     }));
@@ -437,7 +542,7 @@ export default function WorkflowBuilder() {
 
     if (!node) return null;
 
-    const edge = edgeMap.get(node.id) || {};
+    const nodeEdges = edgeMap.get(node.id) || [];
 
     return {
       id: node.id,
@@ -448,10 +553,7 @@ export default function WorkflowBuilder() {
         node.data.aiRuleDefinition,
       aiTestRules: node.data.aiTestRules,
       comments: node.data.comments,
-      yesCondition: "YES",
-      yesNextNodeId: edge.yes?.target || "",
-      noCondition: "NO",
-      noNextNodeId: edge.no?.target || "",
+      nextNodeIds: nodeEdges.map((edge) => edge.target),
     };
   }, [nodes, selectedNodeId, edgeMap]);
 
@@ -509,28 +611,8 @@ export default function WorkflowBuilder() {
         aiTestRules: data.aiTestRules,
         comments: data.comments,
       });
-
-      setEdges((prev) => {
-        let next = replaceEdge(
-          prev,
-          data.id,
-          0,
-          data.yesNextNodeId,
-          "YES"
-        );
-
-        next = replaceEdge(
-          next,
-          data.id,
-          1,
-          data.noNextNodeId,
-          "NO"
-        );
-
-        return next;
-      });
     },
-    [updateNode, setEdges]
+    [updateNode]
   );
 
   const handlePromptSubmit = useCallback(
@@ -564,7 +646,6 @@ export default function WorkflowBuilder() {
                 edges: edges.map((edge) => ({
                   source: edge.source,
                   target: edge.target,
-                  label: edge.label,
                 })),
               },
             }),

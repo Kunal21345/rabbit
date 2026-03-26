@@ -822,12 +822,14 @@ export function Canvas<
   );
 
   const handleWheel = useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
+    (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) {
         return;
       }
 
-      event.preventDefault();
+      if (event.cancelable) {
+        event.preventDefault();
+      }
 
       const element = containerRef.current;
       if (!element) return;
@@ -869,6 +871,23 @@ export function Canvas<
     },
     [activeViewport, viewportLocked]
   );
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const listener = (event: WheelEvent) => {
+      handleWheel(event);
+    };
+
+    element.addEventListener("wheel", listener, {
+      passive: false,
+    });
+
+    return () => {
+      element.removeEventListener("wheel", listener);
+    };
+  }, [handleWheel]);
 
   useEffect(() => {
     return () => {
@@ -926,7 +945,6 @@ export function Canvas<
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      onWheel={handleWheel}
       style={{
         width: "100%",
         height: "100%",

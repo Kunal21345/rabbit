@@ -16,16 +16,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
 /* -------------------------------------------------- */
 /* Types */
 /* -------------------------------------------------- */
@@ -38,10 +28,7 @@ type NodeData = {
   aiRuleDefinition: string;
   aiTestRules: string;
   comments: string;
-  yesCondition: string;
-  yesNextNodeId: string;
-  noCondition: string;
-  noNextNodeId: string;
+  nextNodeIds: string[];
 };
 
 type NodeSheetProps = {
@@ -55,8 +42,13 @@ type NodeSheetProps = {
   }[];
 };
 
+type EditableNodeField = Exclude<
+  keyof NodeData,
+  "id" | "label" | "nextNodeIds"
+>;
+
 type FieldSchema = {
-  key: keyof NodeData;
+  key: EditableNodeField;
   label: string;
   type: "textarea" | "input";
 };
@@ -125,11 +117,7 @@ export function NodeSheet({
       return;
     }
 
-    setDraft({
-      ...node,
-      yesCondition: "YES",
-      noCondition: "NO",
-    });
+    setDraft(node);
   }, [node]);
 
   /* -------------------------------------------------- */
@@ -151,7 +139,7 @@ export function NodeSheet({
   /* -------------------------------------------------- */
 
   const updateField = useCallback(
-    (key: keyof NodeData, value: string) => {
+    (key: EditableNodeField, value: string) => {
       setDraft((prev) =>
         prev
           ? {
@@ -198,25 +186,15 @@ export function NodeSheet({
   /* Options */
   /* -------------------------------------------------- */
 
-  const yesOptions = useMemo(() => {
+  const nextTargetLabels = useMemo(() => {
     if (!draft) return [];
 
-    return nodes.filter(
-      (n) =>
-        n.id !== draft.id &&
-        n.id !== "start" &&
-        n.id !== draft.noNextNodeId
+    const labelMap = new Map(
+      nodes.map((node) => [node.id, node.label])
     );
-  }, [nodes, draft]);
 
-  const noOptions = useMemo(() => {
-    if (!draft) return [];
-
-    return nodes.filter(
-      (n) =>
-        n.id !== draft.id &&
-        n.id !== "start" &&
-        n.id !== draft.yesNextNodeId
+    return draft.nextNodeIds.map(
+      (nodeId) => labelMap.get(nodeId) || nodeId
     );
   }, [nodes, draft]);
 
@@ -299,106 +277,22 @@ export function NodeSheet({
           {MAIN_FIELDS.map(renderField)}
         </div>
 
-        {/* YES / NO */}
+        {/* Next Steps */}
 
         <div className="grid gap-6 p-6 border-b">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-3">
-              <Label htmlFor="yesCondition">
-                YES Condition
-              </Label>
+          <div className="grid gap-3">
+            <Label>Connected Targets</Label>
 
-              <Input
-                id="yesCondition"
-                value="YES"
-                disabled
-                className="border border-border bg-muted"
-              />
-            </div>
-
-            <div className="grid gap-3">
-              <Label htmlFor="yesNextNodeId">
-                YES Target
-              </Label>
-
-              <Select
-                value={draft.yesNextNodeId}
-                onValueChange={(value) =>
-                  updateField("yesNextNodeId", value)
-                }
-              >
-                <SelectTrigger
-                  id="yesNextNodeId"
-                  className={FIELD_CLASS}
-                >
-                  <SelectValue placeholder="Select node" />
-                </SelectTrigger>
-
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Nodes</SelectLabel>
-
-                    {yesOptions.map((n) => (
-                      <SelectItem
-                        key={n.id}
-                        value={n.id}
-                      >
-                        {n.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-3">
-              <Label htmlFor="noCondition">
-                NO Condition
-              </Label>
-
-              <Input
-                id="noCondition"
-                value="NO"
-                disabled
-                className="border border-border bg-muted"
-              />
-            </div>
-
-            <div className="grid gap-3">
-              <Label htmlFor="noNextNodeId">
-                NO Target
-              </Label>
-
-              <Select
-                value={draft.noNextNodeId}
-                onValueChange={(value) =>
-                  updateField("noNextNodeId", value)
-                }
-              >
-                <SelectTrigger
-                  id="noNextNodeId"
-                  className={FIELD_CLASS}
-                >
-                  <SelectValue placeholder="Select node" />
-                </SelectTrigger>
-
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Nodes</SelectLabel>
-
-                    {noOptions.map((n) => (
-                      <SelectItem
-                        key={n.id}
-                        value={n.id}
-                      >
-                        {n.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+            <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
+              {nextTargetLabels.length > 0 ? (
+                <div className="space-y-1">
+                  {nextTargetLabels.map((label) => (
+                    <p key={label}>{label}</p>
+                  ))}
+                </div>
+              ) : (
+                <p>No outgoing connections</p>
+              )}
             </div>
           </div>
         </div>

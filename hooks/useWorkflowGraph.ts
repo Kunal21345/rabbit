@@ -63,20 +63,6 @@ function buildNextNodePosition(nodes: WorkflowNode) {
   };
 }
 
-function normalizeLabels(edges: WorkflowEdge[], source: string) {
-  return edges.map((edge) => {
-    if (edge.source !== source) return edge;
-
-    const sourceEdges = edges.filter((e) => e.source === source);
-    const currentIndex = sourceEdges.findIndex((e) => e.id === edge.id);
-
-    return {
-      ...edge,
-      label: currentIndex === 0 ? "YES" : "NO",
-    };
-  });
-}
-
 /* ====================================================== */
 /* Hook */
 /* ====================================================== */
@@ -184,10 +170,6 @@ export function useWorkflowGraph(
     if (!connection.source || !connection.target) return;
 
     setEdges((prev) => {
-      const sourceEdges = prev.filter(
-        (edge) => edge.source === connection.source
-      );
-
       const exists = prev.some(
         (edge) =>
           edge.source === connection.source &&
@@ -196,21 +178,13 @@ export function useWorkflowGraph(
 
       if (exists) return prev;
 
-      if (sourceEdges.length >= 2) return prev;
-
-      const label = sourceEdges.length === 0 ? "YES" : "NO";
-
-      const next = [
+      return [
         ...prev,
         {
           ...connection,
           id: `${connection.source}-${connection.target}`,
-          label,
-          type: label === "YES" ? "animated" : "temporary",
         },
       ] as WorkflowEdge[];
-
-      return normalizeLabels(next, connection.source);
     });
   }, []);
 
@@ -219,14 +193,9 @@ export function useWorkflowGraph(
   /* ====================================================== */
 
   const removeEdge = useCallback((edgeId: string) => {
-    setEdges((prev) => {
-      const targetEdge = prev.find((e) => e.id === edgeId);
-      if (!targetEdge) return prev;
-
-      const next = prev.filter((e) => e.id !== edgeId);
-
-      return normalizeLabels(next, targetEdge.source);
-    });
+    setEdges((prev) =>
+      prev.filter((edge) => edge.id !== edgeId)
+    );
   }, []);
 
   const updateEdgeTarget = useCallback(
@@ -255,15 +224,11 @@ export function useWorkflowGraph(
                 ...edge,
                 id: `${edge.source}-${target}`,
                 target,
-                type:
-                  edge.label === "NO"
-                    ? "temporary"
-                    : "animated",
               }
             : edge
         );
 
-        return normalizeLabels(next, currentEdge.source);
+        return next;
       });
     },
     []
@@ -283,21 +248,11 @@ export function useWorkflowGraph(
     );
 
     setEdges((prev) => {
-      let next = prev.filter(
+      return prev.filter(
         (edge) =>
           !idSet.has(edge.source) &&
           !idSet.has(edge.target)
       );
-
-      const remainingSources = new Set(
-        next.map((edge) => edge.source)
-      );
-
-      remainingSources.forEach((source) => {
-        next = normalizeLabels(next, source);
-      });
-
-      return next;
     });
   }, []);
 

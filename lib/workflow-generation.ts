@@ -22,7 +22,6 @@ export type WorkflowGenerationRequest = {
     edges: Array<{
       source: string;
       target: string;
-      label?: string;
     }>;
   };
 };
@@ -47,7 +46,6 @@ export type GeneratedWorkflowNode = {
 export type GeneratedWorkflowEdge = {
   source: string;
   target: string;
-  label: "YES" | "NO";
 };
 
 type DagreNode = {
@@ -116,17 +114,13 @@ export const WORKFLOW_GENERATION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["source", "target", "label"],
+        required: ["source", "target"],
         properties: {
           source: {
             type: "string",
           },
           target: {
             type: "string",
-          },
-          label: {
-            type: "string",
-            enum: ["YES", "NO"],
           },
         },
       },
@@ -177,48 +171,23 @@ export function normalizeGeneratedWorkflow(
   });
 
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edgeBuckets = new Map<string, GeneratedWorkflowEdge[]>();
+  const seenEdges = new Set<string>();
+  const edges: GeneratedWorkflowEdge[] = [];
 
   for (const edge of workflow.edges) {
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
       continue;
     }
 
-    const bucket = edgeBuckets.get(edge.source) || [];
+    const edgeKey = `${edge.source}:${edge.target}`;
 
-    if (
-      bucket.some(
-        (item) =>
-          item.target === edge.target ||
-          item.label === edge.label
-      )
-    ) {
+    if (seenEdges.has(edgeKey)) {
       continue;
     }
 
-    if (bucket.length >= 2) {
-      continue;
-    }
-
-    bucket.push(edge);
-    edgeBuckets.set(edge.source, bucket);
+    seenEdges.add(edgeKey);
+    edges.push(edge);
   }
-
-  const edges = [...edgeBuckets.values()].flatMap((bucket) => {
-    if (bucket.length === 1) {
-      return [
-        {
-          ...bucket[0],
-          label: "YES" as const,
-        },
-      ];
-    }
-
-    const yes = bucket.find((edge) => edge.label === "YES");
-    const no = bucket.find((edge) => edge.label === "NO");
-
-    return [yes, no].filter(Boolean) as GeneratedWorkflowEdge[];
-  });
 
   return {
     title: workflow.title.trim(),
@@ -301,8 +270,6 @@ export function buildWorkflowGraph(
     id: `${edge.source}-${edge.target}`,
     source: edge.source,
     target: edge.target,
-    label: edge.label,
-    type: edge.label === "YES" ? "animated" : "temporary",
   }));
 
   return {
