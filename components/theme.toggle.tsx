@@ -2,6 +2,7 @@
 
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { MoonIcon, SunIcon } from "lucide-react";
 
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -15,9 +16,14 @@ export function ThemeToggle() {
       onClick={() =>
         setTheme(resolvedTheme === "light" ? "dark" : "light")
       }
-      className="px-4 py-2 rounded-md bg-card border border-border"
+      className="rounded-md p-3 transition-colors hover:bg-accent hover:text-accent-foreground"
+      aria-label="Toggle theme"
     >
-      Toggle Theme
+      {resolvedTheme === "light" ? (
+        <SunIcon className="h-4 w-4" />
+      ) : (
+        <MoonIcon className="h-4 w-4" />
+      )}
     </button>
   );
 }
