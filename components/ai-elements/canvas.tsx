@@ -529,7 +529,14 @@ export function Canvas<
 
   const handleBackgroundPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (event.target !== event.currentTarget) return;
+      const isCanvasRootTarget =
+        event.target === event.currentTarget;
+      const isBackgroundSvgTarget =
+        event.target instanceof SVGSVGElement;
+
+      if (!isCanvasRootTarget && !isBackgroundSvgTarget) {
+        return;
+      }
 
       if (event.shiftKey) {
         pointerStateRef.current = {
