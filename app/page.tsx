@@ -5,8 +5,10 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import dagre from "dagre";
 import { Header } from "@/components/header";
@@ -25,6 +27,7 @@ import {
 
 import { ThemeToggle } from "@/components/theme.toggle";
 import { NodeSheet } from "@/components/sheet-panel";
+import { Button } from "@/components/ui/button";
 
 import {
   useWorkflowGraph,
@@ -158,6 +161,13 @@ function buildEdgeMap(edges: WorkflowEdge[]) {
 const LAYOUT_NODE_WIDTH = 320;
 const LAYOUT_NODE_HEIGHT = 144;
 const CHILD_VERTICAL_GAP = 96;
+const MIN_CANVAS_WIDTH = 420;
+const MIN_CHATBOT_WIDTH = 320;
+const DEFAULT_CHATBOT_WIDTH = 420;
+
+function clampValue(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
 
 function layoutNodePositions(
   nodes: WorkflowNode[],
@@ -367,6 +377,17 @@ export default function WorkflowBuilder() {
     useState<string | null>(null);
   const [isGeneratingWorkflow, setIsGeneratingWorkflow] =
     useState(false);
+  const [chatbotWidth, setChatbotWidth] = useState(
+    DEFAULT_CHATBOT_WIDTH
+  );
+  const [contentWidth, setContentWidth] = useState(0);
+  const [isResizing, setIsResizing] = useState(false);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const resizeStateRef = useRef<{
+    startClientX: number;
+    startWidth: number;
+    containerWidth: number;
+  } | null>(null);
   const persistedGraph = useDebounce(
     { nodes, edges },
     800
@@ -460,6 +481,22 @@ export default function WorkflowBuilder() {
   }, [edges, graphTopologyKey, hydrated, setNodes]);
 
   useEffect(() => {
+    const element = contentRef.current;
+    if (!element) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+
+      setContentWidth(entry.contentRect.width);
+    });
+
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function checkWorkflowGenerationConfig() {
@@ -499,6 +536,74 @@ export default function WorkflowBuilder() {
       cancelled = true;
     };
   }, []);
+
+  const maxChatbotWidth = useMemo(() => {
+    if (contentWidth === 0) {
+      return DEFAULT_CHATBOT_WIDTH;
+    }
+
+    return Math.max(
+      MIN_CHATBOT_WIDTH,
+      contentWidth - MIN_CANVAS_WIDTH
+    );
+  }, [contentWidth]);
+
+  useEffect(() => {
+    setChatbotWidth((current) =>
+      clampValue(
+        current,
+        MIN_CHATBOT_WIDTH,
+        maxChatbotWidth
+      )
+    );
+  }, [maxChatbotWidth]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const currentResize = resizeStateRef.current;
+      if (!currentResize) return;
+
+      const deltaX =
+        currentResize.startClientX - event.clientX;
+      const maxWidth = Math.max(
+        MIN_CHATBOT_WIDTH,
+        currentResize.containerWidth -
+          MIN_CANVAS_WIDTH
+      );
+
+      const nextWidth = clampValue(
+        currentResize.startWidth + deltaX,
+        MIN_CHATBOT_WIDTH,
+        maxWidth
+      );
+
+      setChatbotWidth(nextWidth);
+    };
+
+    const stopResizing = () => {
+      setIsResizing(false);
+      resizeStateRef.current = null;
+    };
+
+    window.addEventListener(
+      "pointermove",
+      handlePointerMove
+    );
+    window.addEventListener("pointerup", stopResizing);
+
+    return () => {
+      window.removeEventListener(
+        "pointermove",
+        handlePointerMove
+      );
+      window.removeEventListener(
+        "pointerup",
+        stopResizing
+      );
+    };
+  }, [isResizing]);
 
   /* ====================================================== */
   /* Derived */
@@ -709,39 +814,78 @@ const handleClearGraph = useCallback(() => {
   localStorage.removeItem(STORAGE_KEY);
 },[setNodes, setEdges]);
 
+  const handleResizeStart = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const container = contentRef.current;
+      if (!container) return;
+
+      resizeStateRef.current = {
+        startClientX: event.clientX,
+        startWidth: chatbotWidth,
+        containerWidth: container.getBoundingClientRect().width,
+      };
+      setIsResizing(true);
+    },
+    [chatbotWidth]
+  );
 
   return (
-    <div className="w-full h-screen relative">
+    <div className="h-screen w-full overflow-hidden">
       <Header>
-        <button onClick={() => addNode()} className="px-4 py-2 border rounded">
+        <Button onClick={() => addNode()} variant="outline" size="sm">
           Add Node
-        </button>
-        <button onClick={handleClearGraph} className="px-4 py-2 border rounded">
+        </Button>
+        <Button
+          onClick={handleClearGraph}
+          variant="outline"
+          size="sm"
+        >
           Clear
-        </button>
+        </Button>
         <ThemeToggle />
+      </Header>
 
-        </Header>
+      <div
+        ref={contentRef}
+        className="grid h-[calc(100vh-4rem)] min-h-0"
+        style={{
+          gridTemplateColumns: `minmax(0, 1fr) 0px ${chatbotWidth}px`,
+        }}
+      >
+        <div className="min-w-0 min-h-0">
+          <Canvas
+            nodes={canvasNodes}
+            edges={canvasEdges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodePositionChange={moveNode}
+            onNodeClick={handleNodeClick}
+            onDeleteNodes={handleDeleteNodes}
+            onDeleteEdge={handleDeleteEdge}
+            onConnect={connectEdge}
+            onReconnectEdgeTarget={updateEdgeTarget}
+            fitView
+          />
+        </div>
 
-      <Canvas
-        nodes={canvasNodes}
-        edges={canvasEdges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onNodePositionChange={moveNode}
-        onNodeClick={handleNodeClick}
-        onDeleteNodes={handleDeleteNodes}
-        onDeleteEdge={handleDeleteEdge}
-        onConnect={connectEdge}
-        onReconnectEdgeTarget={updateEdgeTarget}
-        fitView
-      />
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          onPointerDown={handleResizeStart}
+          className="group relative z-20 w-0 overflow-visible"
+        >
+          <span className="absolute inset-y-0 left-0 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/60" />
+          <span className="absolute inset-y-0 left-0 w-3 -translate-x-1/2 cursor-col-resize bg-transparent" />
+        </div>
 
-      <WorkflowChatbot
-        error={generationError}
-        loading={isGeneratingWorkflow}
-        onSubmit={handlePromptSubmit}
-      />
+        <div className="min-h-0 border-l bg-muted/20">
+          <WorkflowChatbot
+            error={generationError}
+            loading={isGeneratingWorkflow}
+            onSubmit={handlePromptSubmit}
+          />
+        </div>
+      </div>
 
       <NodeSheet
         node={selectedNode}

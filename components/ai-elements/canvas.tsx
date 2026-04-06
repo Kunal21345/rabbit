@@ -267,8 +267,16 @@ export function Canvas<
     width: 0,
     height: 0,
   });
+  const [activeNodeObserverCount, setActiveNodeObserverCount] =
+    useState(0);
   const [measurements, setMeasurements] = useState<Map<string, MeasuredNode>>(
     () => new Map()
+  );
+  const nodeElementsRef = useRef<Map<string, HTMLDivElement>>(
+    new Map()
+  );
+  const nodeObserversRef = useRef<Map<string, ResizeObserver>>(
+    new Map()
   );
 
   useLayoutEffect(() => {
@@ -280,9 +288,21 @@ export function Canvas<
       const entry = entries[0];
       if (!entry) return;
 
-      setContainerSize({
-        width: entry.contentRect.width,
-        height: entry.contentRect.height,
+      setContainerSize((prev) => {
+        const nextWidth = entry.contentRect.width;
+        const nextHeight = entry.contentRect.height;
+
+        if (
+          prev.width === nextWidth &&
+          prev.height === nextHeight
+        ) {
+          return prev;
+        }
+
+        return {
+          width: nextWidth,
+          height: nextHeight,
+        };
       });
     });
 
@@ -291,35 +311,80 @@ export function Canvas<
     return () => observer.disconnect();
   }, []);
 
-  const registerNode = useCallback((nodeId: string, element: HTMLDivElement | null) => {
-    if (!element) return;
+  const registerNode = useCallback(
+    (nodeId: string, element: HTMLDivElement | null) => {
+      const existingElement = nodeElementsRef.current.get(nodeId);
+      const existingObserver = nodeObserversRef.current.get(nodeId);
 
-    const updateSize = () => {
-      const nextSize = {
-        width: element.offsetWidth || DEFAULT_NODE_SIZE.width,
-        height: element.offsetHeight || DEFAULT_NODE_SIZE.height,
+      if (!element) {
+        if (existingObserver) {
+          existingObserver.disconnect();
+          nodeObserversRef.current.delete(nodeId);
+          setActiveNodeObserverCount(
+            nodeObserversRef.current.size
+          );
+        }
+        nodeElementsRef.current.delete(nodeId);
+        return;
+      }
+
+      if (existingElement === element) {
+        return;
+      }
+
+      if (existingObserver) {
+        existingObserver.disconnect();
+        nodeObserversRef.current.delete(nodeId);
+      }
+
+      nodeElementsRef.current.set(nodeId, element);
+
+      const updateSize = () => {
+        const nextSize = {
+          width: element.offsetWidth || DEFAULT_NODE_SIZE.width,
+          height: element.offsetHeight || DEFAULT_NODE_SIZE.height,
+        };
+
+        setMeasurements((prev) => {
+          const current = prev.get(nodeId);
+          if (
+            current &&
+            current.width === nextSize.width &&
+            current.height === nextSize.height
+          ) {
+            return prev;
+          }
+
+          const next = new Map(prev);
+          next.set(nodeId, nextSize);
+          return next;
+        });
       };
 
-      setMeasurements((prev) => {
-        const current = prev.get(nodeId);
-        if (
-          current &&
-          current.width === nextSize.width &&
-          current.height === nextSize.height
-        ) {
-          return prev;
-        }
+      updateSize();
 
-        const next = new Map(prev);
-        next.set(nodeId, nextSize);
-        return next;
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(element);
+      nodeObserversRef.current.set(nodeId, observer);
+      setActiveNodeObserverCount(
+        nodeObserversRef.current.size
+      );
+    },
+    []
+  );
+
+  useEffect(() => {
+    const nodeObservers = nodeObserversRef.current;
+    const nodeElements = nodeElementsRef.current;
+
+    return () => {
+      nodeObservers.forEach((observer) => {
+        observer.disconnect();
       });
+      nodeObservers.clear();
+      nodeElements.clear();
+      setActiveNodeObserverCount(0);
     };
-
-    updateSize();
-
-    const observer = new ResizeObserver(() => updateSize());
-    observer.observe(element);
   }, []);
 
   const autoViewport = useMemo(() => {
@@ -1317,6 +1382,13 @@ export function Canvas<
 
         {children}
       </div>
+
+      {process.env.NODE_ENV !== "production" ? (
+        <div className="pointer-events-none absolute left-3 top-3 z-40 rounded-md border border-border/80 bg-background/90 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm">
+          observers: {activeNodeObserverCount} | nodes:{" "}
+          {nodes.length} | measured: {measurements.size}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -9,17 +9,22 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { BotIcon, RotateCcwIcon, SendIcon, UserIcon } from "lucide-react";
+import { ArrowUpIcon, BotIcon, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+} from "@/components/ui/input-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+  PromptInputSelect,
+  PromptInputSelectContent,
+  PromptInputSelectItem,
+  PromptInputSelectTrigger,
+  PromptInputSelectValue,
+} from "@/components/ai-elements/prompt-input";
 import type { WorkflowGenerationModel } from "@/lib/workflow-generation";
 
 type ChatRole = "assistant" | "user";
@@ -152,32 +157,26 @@ export function WorkflowChatbot({
   }, [loading]);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-end p-3 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:p-0">
-      <section className="pointer-events-auto w-full max-w-xl overflow-hidden rounded-2xl border border-border/70 bg-background/95 shadow-2xl backdrop-blur-md sm:w-[420px]">
+    <div className="h-full w-full">
+      <section className="flex h-full w-full flex-col overflow-hidden bg-background shadow-xl">
         <header className="flex items-center justify-between border-b px-4 py-3">
           <div>
-            <p className="text-sm font-semibold">Workflow Chatbot</p>
-            <p className="text-xs text-muted-foreground">
-              Ask for workflow generation or refinements.
-            </p>
+            <p className="text-xs font-semibold">Workflow Chatbot</p>
           </div>
 
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="xs"
             onClick={handleResetChat}
             disabled={loading}
           >
-            <RotateCcwIcon data-icon="inline-start" />
+            <Plus data-icon="inline-start" />
             New chat
           </Button>
         </header>
 
-        <ScrollArea
-          ref={scrollAreaRef}
-          className="h-72 sm:h-80"
-        >
+        <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
           <div className="space-y-3 p-4">
             {messages.map((message) => (
               <div
@@ -188,29 +187,23 @@ export function WorkflowChatbot({
                     : "justify-start"
                 }`}
               >
-                <div
-                  className={`max-w-[86%] rounded-2xl px-3 py-2 text-sm ${
-                    message.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted"
-                  }`}
-                >
-                  <div className="mb-1 flex items-center gap-1 text-xs opacity-80">
-                    {message.role === "assistant" ? (
+                {message.role === "assistant" ? (
+                  <div className="max-w-[92%] px-1 py-1 text-sm">
+                    <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
                       <BotIcon />
-                    ) : (
-                      <UserIcon />
-                    )}
-                    <span>
-                      {message.role === "assistant"
-                        ? "Assistant"
-                        : "You"}
-                    </span>
+                      <span>Assistant</span>
+                    </div>
+                    <p className="whitespace-pre-wrap leading-relaxed text-foreground">
+                      {message.content}
+                    </p>
                   </div>
-                  <p className="whitespace-pre-wrap leading-relaxed">
-                    {message.content}
-                  </p>
-                </div>
+                ) : (
+                  <div className="max-w-[92%] rounded-2xl border border-primary/40 bg-primary/10 px-3 py-2 text-sm text-foreground">
+                    <p className="whitespace-pre-wrap leading-relaxed">
+                      {message.content}
+                    </p>
+                  </div>
+                )}
               </div>
             ))}
 
@@ -224,49 +217,51 @@ export function WorkflowChatbot({
           </div>
         </ScrollArea>
 
-        <form className="border-t p-3" onSubmit={handleSubmit}>
-          <Textarea
-            className="min-h-[82px] resize-none"
-            disabled={loading}
-            onChange={(event) => setDraft(event.currentTarget.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a workflow request..."
-            value={draft}
-          />
+        <form className="border-t bg-background p-3" onSubmit={handleSubmit}>
+          <InputGroup className="overflow-hidden rounded-2xl">
+            <InputGroupTextarea
+              className="field-sizing-content max-h-48 min-h-16"
+              disabled={loading}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask Codex to create or refine your workflow..."
+              value={draft}
+            />
 
-          <div className="mt-3 flex items-center gap-2">
-            <Select
-              value={model}
-              onValueChange={(value) =>
-                setModel(value as WorkflowGenerationModel)
-              }
-            >
-              <SelectTrigger
-                className="h-8 w-[190px] text-xs"
-                disabled={loading}
+            <InputGroupAddon align="block-end" className="justify-between gap-1">
+              <PromptInputSelect
+                value={model}
+                onValueChange={(value) =>
+                  setModel(value as WorkflowGenerationModel)
+                }
               >
-                <SelectValue />
-              </SelectTrigger>
+                <PromptInputSelectTrigger
+                  className="h-8 w-[190px] text-xs"
+                  disabled={loading}
+                >
+                  <PromptInputSelectValue />
+                </PromptInputSelectTrigger>
 
-              <SelectContent>
-                {MODELS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <PromptInputSelectContent>
+                  {MODELS.map((option) => (
+                    <PromptInputSelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </PromptInputSelectItem>
+                  ))}
+                </PromptInputSelectContent>
+              </PromptInputSelect>
 
-            <Button
-              type="submit"
-              className="ml-auto"
-              size="sm"
-              disabled={!canSubmit}
-            >
-              <SendIcon data-icon="inline-end" />
-              Send
-            </Button>
-          </div>
+              <InputGroupButton
+                aria-label="Send"
+                type="submit"
+                size="icon-sm"
+                className="rounded-full bg-foreground text-background hover:bg-foreground/90"
+                disabled={!canSubmit}
+              >
+                <ArrowUpIcon />
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
 
           {error ? (
             <p className="mt-2 text-xs text-destructive">{error}</p>
