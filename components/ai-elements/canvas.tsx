@@ -69,6 +69,7 @@ type CanvasProps<N extends CanvasNode = CanvasNode, E extends CanvasEdge = Canva
   style?: CSSProperties;
   className?: string;
   colorMode?: "light" | "dark";
+  backgroundColor?: string;
   children?: ReactNode;
   onNodeClick?: (
     event: ReactMouseEvent<HTMLDivElement>,
@@ -175,6 +176,7 @@ export function Canvas<
   style,
   className,
   colorMode = "light",
+  backgroundColor,
   children,
   onNodeClick,
   onNodePositionChange,
@@ -267,8 +269,6 @@ export function Canvas<
     width: 0,
     height: 0,
   });
-  const [activeNodeObserverCount, setActiveNodeObserverCount] =
-    useState(0);
   const [measurements, setMeasurements] = useState<Map<string, MeasuredNode>>(
     () => new Map()
   );
@@ -320,9 +320,6 @@ export function Canvas<
         if (existingObserver) {
           existingObserver.disconnect();
           nodeObserversRef.current.delete(nodeId);
-          setActiveNodeObserverCount(
-            nodeObserversRef.current.size
-          );
         }
         nodeElementsRef.current.delete(nodeId);
         return;
@@ -366,9 +363,6 @@ export function Canvas<
       const observer = new ResizeObserver(updateSize);
       observer.observe(element);
       nodeObserversRef.current.set(nodeId, observer);
-      setActiveNodeObserverCount(
-        nodeObserversRef.current.size
-      );
     },
     []
   );
@@ -383,7 +377,6 @@ export function Canvas<
       });
       nodeObservers.clear();
       nodeElements.clear();
-      setActiveNodeObserverCount(0);
     };
   }, []);
 
@@ -435,6 +428,11 @@ export function Canvas<
     (resolvedTheme === "dark" || resolvedTheme === "light")
       ? resolvedTheme
       : colorMode;
+  const canvasBackgroundColor =
+    backgroundColor ||
+    (activeColorMode === "dark"
+      ? "hsl(222 18% 8%)"
+      : "hsl(210 40% 98%)");
 
   const edgeGeometry = useMemo(() => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -1022,10 +1020,7 @@ export function Canvas<
         height: "100%",
         overflow: "hidden",
         position: "relative",
-        backgroundColor:
-          activeColorMode === "dark"
-            ? "hsl(222 18% 8%)"
-            : "hsl(210 40% 98%)",
+        backgroundColor: canvasBackgroundColor,
         touchAction: "none",
         ...style,
       }}
@@ -1063,10 +1058,7 @@ export function Canvas<
             width: 8000,
             height: 8000,
             pointerEvents: "none",
-            backgroundColor:
-              activeColorMode === "dark"
-                ? "hsl(222 18% 8%)"
-                : "hsl(210 40% 98%)",
+            backgroundColor: canvasBackgroundColor,
             backgroundImage:
               activeColorMode === "dark"
                 ? [
@@ -1383,12 +1375,6 @@ export function Canvas<
         {children}
       </div>
 
-      {process.env.NODE_ENV !== "production" ? (
-        <div className="pointer-events-none absolute left-3 top-3 z-40 rounded-md border border-border/80 bg-background/90 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm">
-          observers: {activeNodeObserverCount} | nodes:{" "}
-          {nodes.length} | measured: {measurements.size}
-        </div>
-      ) : null}
     </div>
   );
 }

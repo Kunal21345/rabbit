@@ -9,7 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { ArrowUpIcon, BotIcon, Plus } from "lucide-react";
+import { ArrowUpIcon, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -158,10 +158,12 @@ export function WorkflowChatbot({
 
   return (
     <div className="h-full w-full">
-      <section className="flex h-full w-full flex-col overflow-hidden bg-background shadow-xl">
-        <header className="flex items-center justify-between border-b px-4 py-3">
+      <section className="flex h-full w-full flex-col overflow-hidden bg-[#0f131b]">
+        <header className="flex h-11 items-center justify-between border-b border-b-muted px-3">
           <div>
-            <p className="text-xs font-semibold">Workflow Chatbot</p>
+            <p className="text-xs font-semibold tracking-wide text-slate-200">
+              Workflow Chatbot
+            </p>
           </div>
 
           <Button
@@ -170,6 +172,7 @@ export function WorkflowChatbot({
             size="xs"
             onClick={handleResetChat}
             disabled={loading}
+            className="rounded-full"
           >
             <Plus data-icon="inline-start" />
             New chat
@@ -177,7 +180,7 @@ export function WorkflowChatbot({
         </header>
 
         <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
-          <div className="space-y-3 p-4">
+          <div className="space-y-4 px-4 py-4">
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -189,16 +192,12 @@ export function WorkflowChatbot({
               >
                 {message.role === "assistant" ? (
                   <div className="max-w-[92%] px-1 py-1 text-sm">
-                    <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-                      <BotIcon />
-                      <span>Assistant</span>
-                    </div>
-                    <p className="whitespace-pre-wrap leading-relaxed text-foreground">
+                    <p className="whitespace-pre-wrap leading-relaxed text-slate-200">
                       {message.content}
                     </p>
                   </div>
                 ) : (
-                  <div className="max-w-[92%] rounded-2xl border border-primary/40 bg-primary/10 px-3 py-2 text-sm text-foreground">
+                  <div className="max-w-[92%] rounded-2xl bg-slate-800/90 px-3 py-2 text-sm text-slate-100">
                     <p className="whitespace-pre-wrap leading-relaxed">
                       {message.content}
                     </p>
@@ -209,7 +208,7 @@ export function WorkflowChatbot({
 
             {loading ? (
               <div className="flex justify-start">
-                <div className="rounded-2xl bg-muted px-3 py-2 text-xs text-muted-foreground">
+                <div className="rounded-2xl border border-muted bg-slate-900/80 px-3 py-2 text-xs text-slate-400">
                   Generating workflow...
                 </div>
               </div>
@@ -217,8 +216,8 @@ export function WorkflowChatbot({
           </div>
         </ScrollArea>
 
-        <form className="border-t bg-background p-3" onSubmit={handleSubmit}>
-          <InputGroup className="overflow-hidden rounded-2xl">
+        <form className="border-t border-t-muted bg-[#0f131b] p-3" onSubmit={handleSubmit}>
+          <InputGroup className="overflow-hidden rounded-2xl border-muted bg-slate-900/80">
             <InputGroupTextarea
               className="field-sizing-content max-h-48 min-h-16"
               disabled={loading}
@@ -236,7 +235,7 @@ export function WorkflowChatbot({
                 }
               >
                 <PromptInputSelectTrigger
-                  className="h-8 w-[190px] text-xs"
+                  className="h-8 w-[190px] rounded-full bg-slate-800/90 text-xs text-slate-200 hover:bg-slate-700"
                   disabled={loading}
                 >
                   <PromptInputSelectValue />
@@ -255,7 +254,7 @@ export function WorkflowChatbot({
                 aria-label="Send"
                 type="submit"
                 size="icon-sm"
-                className="rounded-full bg-foreground text-background hover:bg-foreground/90"
+                className="rounded-full bg-slate-100 text-slate-900 hover:bg-white"
                 disabled={!canSubmit}
               >
                 <ArrowUpIcon />

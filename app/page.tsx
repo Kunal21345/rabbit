@@ -15,6 +15,7 @@ import { Header } from "@/components/header";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
 import { WorkflowChatbot } from "@/components/workflow-chatbot";
+import { PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
 
 import {
   Node as CustomNode,
@@ -382,12 +383,18 @@ export default function WorkflowBuilder() {
   );
   const [contentWidth, setContentWidth] = useState(0);
   const [isResizing, setIsResizing] = useState(false);
+  const [isChatbotCollapsed, setIsChatbotCollapsed] =
+    useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
   const resizeStateRef = useRef<{
     startClientX: number;
     startWidth: number;
     containerWidth: number;
   } | null>(null);
+  const resizeRafRef = useRef<number | null>(null);
+  const pendingWidthRef = useRef<number | null>(null);
   const persistedGraph = useDebounce(
     { nodes, edges },
     800
@@ -481,6 +488,11 @@ export default function WorkflowBuilder() {
   }, [edges, graphTopologyKey, hydrated, setNodes]);
 
   useEffect(() => {
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
+  }, [nodes, edges]);
+
+  useEffect(() => {
     const element = contentRef.current;
     if (!element) return;
 
@@ -488,7 +500,14 @@ export default function WorkflowBuilder() {
       const entry = entries[0];
       if (!entry) return;
 
-      setContentWidth(entry.contentRect.width);
+      const nextWidth = entry.contentRect.width;
+      setContentWidth((previousWidth) => {
+        if (Math.abs(previousWidth - nextWidth) < 0.5) {
+          return previousWidth;
+        }
+
+        return nextWidth;
+      });
     });
 
     observer.observe(element);
@@ -579,12 +598,37 @@ export default function WorkflowBuilder() {
         maxWidth
       );
 
-      setChatbotWidth(nextWidth);
+      pendingWidthRef.current = nextWidth;
+
+      if (resizeRafRef.current !== null) {
+        return;
+      }
+
+      resizeRafRef.current = window.requestAnimationFrame(() => {
+        const pendingWidth = pendingWidthRef.current;
+        resizeRafRef.current = null;
+
+        if (pendingWidth === null) return;
+
+        setChatbotWidth((current) => {
+          if (Math.abs(current - pendingWidth) < 0.5) {
+            return current;
+          }
+
+          return pendingWidth;
+        });
+      });
     };
 
     const stopResizing = () => {
       setIsResizing(false);
       resizeStateRef.current = null;
+      pendingWidthRef.current = null;
+
+      if (resizeRafRef.current !== null) {
+        window.cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
     };
 
     window.addEventListener(
@@ -604,6 +648,14 @@ export default function WorkflowBuilder() {
       );
     };
   }, [isResizing]);
+
+  useEffect(() => {
+    return () => {
+      if (resizeRafRef.current !== null) {
+        window.cancelAnimationFrame(resizeRafRef.current);
+      }
+    };
+  }, []);
 
   /* ====================================================== */
   /* Derived */
@@ -745,7 +797,7 @@ export default function WorkflowBuilder() {
               prompt,
               model,
               currentGraph: {
-                nodes: nodes.map((node) => ({
+                nodes: nodesRef.current.map((node) => ({
                   id: node.id,
                   label: node.data.label,
                   description:
@@ -753,7 +805,7 @@ export default function WorkflowBuilder() {
                   businessRule:
                     node.data.businessRule,
                 })),
-                edges: edges.map((edge) => ({
+                edges: edgesRef.current.map((edge) => ({
                   source: edge.source,
                   target: edge.target,
                 })),
@@ -798,7 +850,7 @@ export default function WorkflowBuilder() {
         setIsGeneratingWorkflow(false);
       }
     },
-    [edges, nodes, setEdges, setNodes]
+    [setEdges, setNodes]
   );
 
   /* ====================================================== */
@@ -816,6 +868,8 @@ const handleClearGraph = useCallback(() => {
 
   const handleResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (isChatbotCollapsed) return;
+
       const container = contentRef.current;
       if (!container) return;
 
@@ -826,64 +880,110 @@ const handleClearGraph = useCallback(() => {
       };
       setIsResizing(true);
     },
-    [chatbotWidth]
+    [chatbotWidth, isChatbotCollapsed]
   );
 
-  return (
-    <div className="h-screen w-full overflow-hidden">
-      <Header>
-        <Button onClick={() => addNode()} variant="outline" size="sm">
-          Add Node
-        </Button>
-        <Button
-          onClick={handleClearGraph}
-          variant="outline"
-          size="sm"
-        >
-          Clear
-        </Button>
-        <ThemeToggle />
-      </Header>
+  const effectiveChatbotWidth = isChatbotCollapsed
+    ? 0
+    : chatbotWidth;
 
+  return (
+    <div className="h-screen w-full overflow-hidden text-slate-100">
       <div
         ref={contentRef}
-        className="grid h-[calc(100vh-4rem)] min-h-0"
+        className="grid h-screen min-h-0 p-2"
         style={{
-          gridTemplateColumns: `minmax(0, 1fr) 0px ${chatbotWidth}px`,
+          gridTemplateColumns: `minmax(0, 1fr) 0px ${effectiveChatbotWidth}px`,
         }}
       >
-        <div className="min-w-0 min-h-0">
-          <Canvas
-            nodes={canvasNodes}
-            edges={canvasEdges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            onNodePositionChange={moveNode}
-            onNodeClick={handleNodeClick}
-            onDeleteNodes={handleDeleteNodes}
-            onDeleteEdge={handleDeleteEdge}
-            onConnect={connectEdge}
-            onReconnectEdgeTarget={updateEdgeTarget}
-            fitView
-          />
+        <div className="min-w-0 min-h-0 p-[2px]">
+          <div className="relative h-full w-full min-h-0 overflow-hidden rounded-[8px] border border-muted">
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+              <Header className="pointer-events-auto h-11 bg-transparent px-3 py-0">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() =>
+                      setIsChatbotCollapsed((value) => !value)
+                    }
+                    aria-label={
+                      isChatbotCollapsed
+                        ? "Expand chatbot panel"
+                        : "Collapse chatbot panel"
+                    }
+                  >
+                    {isChatbotCollapsed ? (
+                      <PanelRightOpenIcon />
+                    ) : (
+                      <PanelRightCloseIcon />
+                    )}
+                  </Button>
+
+                  <Button onClick={() => addNode()} variant="secondary" size="sm" className="rounded-full border-muted bg-slate-900/80 text-slate-100 hover:bg-slate-800">
+                    Add Node
+                  </Button>
+                  <Button
+                    onClick={handleClearGraph}
+                    variant="secondary"
+                    size="sm"
+                    className="rounded-full border-muted bg-slate-900/80 text-slate-100 hover:bg-slate-800"
+                  >
+                    Clear
+                  </Button>
+                  <ThemeToggle />
+                </div>
+              </Header>
+            </div>
+
+            <div className="h-full w-full">
+              <Canvas
+                nodes={canvasNodes}
+                edges={canvasEdges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                colorMode="dark"
+                backgroundColor="#0b0d12"
+                onNodePositionChange={moveNode}
+                onNodeClick={handleNodeClick}
+                onDeleteNodes={handleDeleteNodes}
+                onDeleteEdge={handleDeleteEdge}
+                onConnect={connectEdge}
+                onReconnectEdgeTarget={updateEdgeTarget}
+                fitView
+              />
+            </div>
+          </div>
         </div>
 
         <div
           role="separator"
           aria-orientation="vertical"
           onPointerDown={handleResizeStart}
-          className="group relative z-20 w-0 overflow-visible"
+          className={`group relative z-20 w-0 overflow-visible ${
+            isChatbotCollapsed
+              ? "pointer-events-none opacity-0"
+              : "opacity-100"
+          }`}
         >
-          <span className="absolute inset-y-0 left-0 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/60" />
-          <span className="absolute inset-y-0 left-0 w-3 -translate-x-1/2 cursor-col-resize bg-transparent" />
+          <span className="absolute inset-y-0 left-0 w-4 -translate-x-1/2 cursor-col-resize bg-transparent" />
         </div>
 
-        <div className="min-h-0 border-l bg-muted/20">
-          <WorkflowChatbot
-            error={generationError}
-            loading={isGeneratingWorkflow}
-            onSubmit={handlePromptSubmit}
-          />
+        <div
+          className={`min-h-0 overflow-hidden transition-[width,opacity,margin] ${
+            isChatbotCollapsed
+              ? "pointer-events-none ml-0 opacity-0"
+              : "ml-3 opacity-100"
+          }`}
+        >
+          <div className="h-full w-full overflow-hidden rounded-[8px] border border-muted bg-[#0f131b]">
+            <WorkflowChatbot
+              error={generationError}
+              loading={isGeneratingWorkflow}
+              onSubmit={handlePromptSubmit}
+            />
+          </div>
         </div>
       </div>
 
