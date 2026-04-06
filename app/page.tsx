@@ -12,7 +12,7 @@ import dagre from "dagre";
 import { Header } from "@/components/header";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
-import { WorkflowPromptBox } from "@/components/workflow-prompt-box";
+import { WorkflowChatbot } from "@/components/workflow-chatbot";
 
 import {
   Node as CustomNode,
@@ -47,6 +47,11 @@ type NodeSheetPayload = {
   aiTestRules: string;
   comments: string;
   nextNodeIds: string[];
+};
+
+type WorkflowSubmitResult = {
+  ok: boolean;
+  message: string;
 };
 
 /* ====================================================== */
@@ -619,7 +624,7 @@ export default function WorkflowBuilder() {
     async (
       prompt: string,
       model: WorkflowGenerationModel
-    ) => {
+    ): Promise<WorkflowSubmitResult> => {
       setGenerationError(null);
       setIsGeneratingWorkflow(true);
 
@@ -666,12 +671,24 @@ export default function WorkflowBuilder() {
         setEdges(payload.graph.edges);
         setSelectedNodeId(null);
         setSheetOpen(false);
+        return {
+          ok: true,
+          message:
+            "Workflow updated. Ask me for refinements if you want to tweak steps, labels, or business rules.",
+        };
       } catch (error) {
-        setGenerationError(
+        const errorMessage =
           error instanceof Error
             ? error.message
-            : "Failed to generate workflow."
+            : "Failed to generate workflow.";
+
+        setGenerationError(
+          errorMessage
         );
+        return {
+          ok: false,
+          message: `I could not update the workflow: ${errorMessage}`,
+        };
       } finally {
         setIsGeneratingWorkflow(false);
       }
@@ -720,7 +737,7 @@ const handleClearGraph = useCallback(() => {
         fitView
       />
 
-      <WorkflowPromptBox
+      <WorkflowChatbot
         error={generationError}
         loading={isGeneratingWorkflow}
         onSubmit={handlePromptSubmit}
