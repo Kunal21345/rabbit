@@ -15,7 +15,7 @@ import { Header } from "@/components/header";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
 import { WorkflowChatbot } from "@/components/workflow-chatbot";
-import { PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
+import { PanelRightCloseIcon, PanelRightOpenIcon, PlusIcon, RefreshCcw } from "lucide-react";
 
 import {
   Node as CustomNode,
@@ -888,7 +888,7 @@ const handleClearGraph = useCallback(() => {
     : chatbotWidth;
 
   return (
-    <div className="h-screen w-full overflow-hidden text-slate-100">
+    <div className="h-screen w-full overflow-hidden text-foreground">
       <div
         ref={contentRef}
         className="grid h-screen min-h-0 p-2"
@@ -901,6 +901,19 @@ const handleClearGraph = useCallback(() => {
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <Header className="pointer-events-auto h-11 bg-transparent px-3 py-0">
                 <div className="flex items-center gap-2">
+                  <Button onClick={() => addNode()} variant="ghost" size="xs" className="rounded-sm bg-inherit border border-border bg-card/90 text-foreground hover:bg-accent hover:text-accent-foreground py-3 px-2">
+                    <PlusIcon className="size-3" />
+                    Add Node
+                  </Button>
+                  <Button
+                    onClick={handleClearGraph}
+                    variant="ghost"
+                    size="xs"
+                    className="rounded-sm bg-transparent border border-border bg-card/90 text-foreground hover:bg-accent hover:text-accent-foreground py-3 px-2"
+                  >
+                    <RefreshCcw className="size-3" />
+                    Clear
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
@@ -920,24 +933,11 @@ const handleClearGraph = useCallback(() => {
                       <PanelRightCloseIcon />
                     )}
                   </Button>
-
-                  <Button onClick={() => addNode()} variant="secondary" size="sm" className="rounded-full border-muted bg-slate-900/80 text-slate-100 hover:bg-slate-800">
-                    Add Node
-                  </Button>
-                  <Button
-                    onClick={handleClearGraph}
-                    variant="secondary"
-                    size="sm"
-                    className="rounded-full border-muted bg-slate-900/80 text-slate-100 hover:bg-slate-800"
-                  >
-                    Clear
-                  </Button>
-                  <ThemeToggle />
                 </div>
               </Header>
             </div>
 
-            <div className="h-full w-full">
+            <div className="relative h-full w-full">
               <Canvas
                 nodes={canvasNodes}
                 edges={canvasEdges}
@@ -953,6 +953,9 @@ const handleClearGraph = useCallback(() => {
                 onReconnectEdgeTarget={updateEdgeTarget}
                 fitView
               />
+              <div className="pointer-events-auto absolute bottom-3 right-3 z-20">
+                <ThemeToggle />
+              </div>
             </div>
           </div>
         </div>
@@ -977,7 +980,7 @@ const handleClearGraph = useCallback(() => {
               : "ml-3 opacity-100"
           }`}
         >
-          <div className="h-full w-full overflow-hidden rounded-[8px] border border-muted bg-[#0f131b]">
+          <div className="h-full w-full overflow-hidden rounded-[8px] border border-muted bg-card">
             <WorkflowChatbot
               error={generationError}
               loading={isGeneratingWorkflow}

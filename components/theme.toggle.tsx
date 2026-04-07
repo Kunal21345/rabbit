@@ -16,7 +16,7 @@ export function ThemeToggle() {
       onClick={() =>
         setTheme(resolvedTheme === "light" ? "dark" : "light")
       }
-      className="rounded-md p-3 transition-colors hover:bg-accent hover:text-accent-foreground"
+      className="p-2 text-foreground backdrop-blur transition-colors hover:bg-accent hover:text-accent-foreground"
       aria-label="Toggle theme"
     >
       {resolvedTheme === "light" ? (
