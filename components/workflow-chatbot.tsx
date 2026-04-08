@@ -9,7 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { ArrowUpIcon, Plus } from "lucide-react";
+import { ArrowUpIcon, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -18,6 +18,12 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   PromptInputSelect,
   PromptInputSelectContent,
@@ -166,21 +172,28 @@ export function WorkflowChatbot({
             </p>
           </div>
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={handleResetChat}
-            disabled={loading}
-            className="rounded-sm"
-          >
-            <Plus data-icon="inline-start" />
-            New chat
-          </Button>
+          <TooltipProvider delayDuration={100}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResetChat}
+                  disabled={loading}
+                  aria-label="Reset chat"
+                  className="rounded-sm text-muted-foreground"
+                >
+                  <SquarePen data-icon="inline-start" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Reset chat</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </header>
 
         <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
-          <div className="space-y-4 px-4 py-4">
+          <div className="flex flex-col gap-4 px-4 py-4">
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -250,15 +263,23 @@ export function WorkflowChatbot({
                 </PromptInputSelectContent>
               </PromptInputSelect>
 
-              <InputGroupButton
-                aria-label="Send"
-                type="submit"
-                size="icon-sm"
-                className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
-                disabled={!canSubmit}
-              >
-                <ArrowUpIcon />
-              </InputGroupButton>
+              <TooltipProvider delayDuration={100}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <InputGroupButton
+                      aria-label="Send"
+                      type="submit"
+                      size="icon-sm"
+                      variant="default"
+                      className="rounded-full"
+                      disabled={!canSubmit}
+                    >
+                      <ArrowUpIcon />
+                    </InputGroupButton>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Send message</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </InputGroupAddon>
           </InputGroup>
 

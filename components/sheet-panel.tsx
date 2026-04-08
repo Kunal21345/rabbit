@@ -5,6 +5,8 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { generateRule } from "@/llm/generateRule";
 
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
@@ -89,7 +91,7 @@ const FOOTER_FIELDS: FieldSchema[] = [
 ];
 
 const FIELD_CLASS =
-  "border border-border bg-background shadow-none";
+  "bg-background shadow-none";
 
 /* -------------------------------------------------- */
 /* Component */
@@ -242,15 +244,18 @@ export function NodeSheet({
         )}
 
         {field.key === "businessRule" && (
-          <button
+          <Button
+            type="button"
             onClick={handleGenerate}
             disabled={generating}
-            className="px-3 py-2 text-sm border rounded"
+            variant="secondary"
+            size="sm"
+            className="w-fit"
           >
             {generating
               ? "Generating..."
               : "Generate AI"}
-          </button>
+          </Button>
         )}
       </div>
     );
@@ -261,7 +266,7 @@ export function NodeSheet({
   return (
     <Sheet open={open} onOpenChange={onClose}>
       <SheetContent className="overflow-y-auto">
-        <SheetHeader className="border-b pb-4">
+        <SheetHeader>
           <SheetTitle className="font-bold uppercase">
             {draft.label}
           </SheetTitle>
@@ -270,22 +275,24 @@ export function NodeSheet({
             Configure node logic
           </SheetDescription>
         </SheetHeader>
+        <Separator />
 
         {/* Main */}
 
-        <div className="grid gap-6 p-6 border-b">
+        <div className="grid gap-6 p-6">
           {MAIN_FIELDS.map(renderField)}
         </div>
+        <Separator />
 
         {/* Next Steps */}
 
-        <div className="grid gap-6 p-6 border-b">
+        <div className="grid gap-6 p-6">
           <div className="grid gap-3">
             <Label>Connected Targets</Label>
 
             <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
               {nextTargetLabels.length > 0 ? (
-                <div className="space-y-1">
+                <div className="flex flex-col gap-1">
                   {nextTargetLabels.map((label) => (
                     <p key={label}>{label}</p>
                   ))}
@@ -296,6 +303,7 @@ export function NodeSheet({
             </div>
           </div>
         </div>
+        <Separator />
 
         {/* Footer */}
 

@@ -29,6 +29,12 @@ import {
 import { ThemeToggle } from "@/components/theme.toggle";
 import { NodeSheet } from "@/components/sheet-panel";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 import {
   useWorkflowGraph,
@@ -39,6 +45,7 @@ import {
 
 import { useDebounce } from "@/hooks/useDebounce";
 import type { WorkflowGenerationModel } from "@/lib/workflow-generation";
+import { cn } from "@/lib/utils";
 
 /* ====================================================== */
 
@@ -322,7 +329,7 @@ const WorkflowNodeRenderer = memo(
         </NodeContent>
 
         <NodeFooter>
-          <div className="text-xs space-y-1">
+          <div className="flex flex-col gap-1 text-xs">
             {(data.edges?.length || 0) > 0 ? (
               data.edges?.map((edge) => (
                 <p key={edge.id}>
@@ -888,51 +895,80 @@ const handleClearGraph = useCallback(() => {
     : chatbotWidth;
 
   return (
-    <div className="h-screen w-full overflow-hidden text-foreground">
+    <div className="h-screen w-full overflow-hidden bg-background text-foreground">
       <div
         ref={contentRef}
-        className="grid h-screen min-h-0 p-2"
+        className="grid h-screen min-h-0 p-3"
         style={{
           gridTemplateColumns: `minmax(0, 1fr) 0px ${effectiveChatbotWidth}px`,
         }}
       >
         <div className="min-w-0 min-h-0 p-[2px]">
-          <div className="relative h-full w-full min-h-0 overflow-hidden rounded-[8px] border border-muted">
+          <div className="relative h-full w-full min-h-0 overflow-hidden rounded-lg border border-border bg-card">
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <Header className="pointer-events-auto h-11 bg-transparent px-3 py-0">
                 <div className="flex items-center gap-2">
-                  <Button onClick={() => addNode()} variant="ghost" size="xs" className="rounded-sm bg-inherit border border-border bg-card/90 text-foreground hover:bg-accent hover:text-accent-foreground py-3 px-2">
-                    <PlusIcon className="size-3" />
-                    Add Node
-                  </Button>
-                  <Button
-                    onClick={handleClearGraph}
-                    variant="ghost"
-                    size="xs"
-                    className="rounded-sm bg-transparent border border-border bg-card/90 text-foreground hover:bg-accent hover:text-accent-foreground py-3 px-2"
-                  >
-                    <RefreshCcw className="size-3" />
-                    Clear
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() =>
-                      setIsChatbotCollapsed((value) => !value)
-                    }
-                    aria-label={
-                      isChatbotCollapsed
-                        ? "Expand chatbot panel"
-                        : "Collapse chatbot panel"
-                    }
-                  >
-                    {isChatbotCollapsed ? (
-                      <PanelRightOpenIcon />
-                    ) : (
-                      <PanelRightCloseIcon />
-                    )}
-                  </Button>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          onClick={() => addNode()}
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-sm text-muted-foreground"
+                        >
+                          <PlusIcon data-icon="inline-start" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Add node</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          onClick={handleClearGraph}
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-sm text-muted-foreground"
+                        >
+                          <RefreshCcw data-icon="inline-start" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Clear graph</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-sm text-muted-foreground"
+                          onClick={() =>
+                            setIsChatbotCollapsed((value) => !value)
+                          }
+                          aria-label={
+                            isChatbotCollapsed
+                              ? "Expand chatbot panel"
+                              : "Collapse chatbot panel"
+                          }
+                        >
+                          {isChatbotCollapsed ? (
+                            <PanelRightOpenIcon />
+                          ) : (
+                            <PanelRightCloseIcon />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        {isChatbotCollapsed
+                          ? "Expand chatbot panel"
+                          : "Collapse chatbot panel"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
               </Header>
             </div>
@@ -943,8 +979,6 @@ const handleClearGraph = useCallback(() => {
                 edges={canvasEdges}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
-                colorMode="dark"
-                backgroundColor="#0b0d12"
                 onNodePositionChange={moveNode}
                 onNodeClick={handleNodeClick}
                 onDeleteNodes={handleDeleteNodes}
@@ -964,23 +998,26 @@ const handleClearGraph = useCallback(() => {
           role="separator"
           aria-orientation="vertical"
           onPointerDown={handleResizeStart}
-          className={`group relative z-20 w-0 overflow-visible ${
+          className={cn(
+            "group relative z-20 w-0 overflow-visible transition-opacity",
             isChatbotCollapsed
               ? "pointer-events-none opacity-0"
               : "opacity-100"
-          }`}
+          )}
         >
           <span className="absolute inset-y-0 left-0 w-4 -translate-x-1/2 cursor-col-resize bg-transparent" />
+          <span className="pointer-events-none absolute inset-y-4 left-0 -translate-x-1/2 border-l border-border/70" />
         </div>
 
         <div
-          className={`min-h-0 overflow-hidden transition-[width,opacity,margin] ${
+          className={cn(
+            "min-h-0 overflow-hidden transition-[width,opacity,margin]",
             isChatbotCollapsed
               ? "pointer-events-none ml-0 opacity-0"
               : "ml-3 opacity-100"
-          }`}
+          )}
         >
-          <div className="h-full w-full overflow-hidden rounded-[8px] border border-muted bg-card">
+          <div className="h-full w-full overflow-hidden rounded-lg border border-border bg-card">
             <WorkflowChatbot
               error={generationError}
               loading={isGeneratingWorkflow}
