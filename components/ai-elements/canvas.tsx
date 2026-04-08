@@ -430,11 +430,11 @@ export function Canvas<
   const canvasBackgroundColor =
     backgroundColor ||
     (activeColorMode === "dark"
-      ? "hsl(222 18% 8%)"
-      : "hsl(210 40% 98%)");
+      ? "hsl(225, 14%, 6%)"
+      : "hsl(0, 0%, 100%)");
   const canvasGridBackgroundImage =
     activeColorMode === "dark"
-      ? "radial-gradient(circle at center, rgba(255,255,255,0.12) 0 1.2px, transparent 1.3px)"
+      ? "radial-gradient(circle at center, rgba(49, 49, 49, 0.67) 0 1.2px, transparent 1.3px)"
       : "radial-gradient(circle at center, rgba(15,23,42,0.14) 0 1.2px, transparent 1.3px)";
 
   const edgeGeometry = useMemo(() => {
@@ -1061,7 +1061,7 @@ export function Canvas<
         backgroundImage: canvasGridBackgroundImage,
         backgroundRepeat: "repeat",
         backgroundPosition: "0 0",
-        backgroundSize: "22px 22px",
+        backgroundSize: "8px 8px",
         touchAction: "none",
         ...style,
       }}

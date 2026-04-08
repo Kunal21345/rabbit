@@ -972,7 +972,7 @@ const handleClearGraph = useCallback(() => {
           )}
         >
           <span className="absolute inset-y-0 left-0 w-4 -translate-x-1/2 cursor-col-resize bg-transparent" />
-          <span className="pointer-events-none absolute inset-y-4 left-0 -translate-x-1/2 border-l border-border/70" />
+          <span className="pointer-events-none absolute inset-y-4 left-0 -translate-x-1/2s" />
         </div>
 
         <div
