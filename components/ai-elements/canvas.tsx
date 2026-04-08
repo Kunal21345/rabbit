@@ -199,10 +199,10 @@ export function Canvas<
     | {
         mode: "drag";
         pointerId: number;
-        nodeId: string;
+        nodeIds: string[];
         startClientX: number;
         startClientY: number;
-        startPosition: NodePosition;
+        startPositions: Map<string, NodePosition>;
         moved: boolean;
       }
     | {
@@ -242,8 +242,7 @@ export function Canvas<
     zoom: 1,
   });
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [selectedEdgeId, setSelectedEdgeId] =
-    useState<string | null>(null);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
   const [viewportLocked, setViewportLocked] = useState(false);
   const [isZoomTransitioning, setIsZoomTransitioning] =
     useState(false);
@@ -575,19 +574,36 @@ export function Canvas<
       const worldBottom =
         (top + height - activeViewport.y) / activeViewport.zoom;
 
-      setSelectedNodeIds(
-        nodeBounds
-          .filter(
-            (node) =>
-              node.left < worldRight &&
-              node.right > worldLeft &&
-              node.top < worldBottom &&
-              node.bottom > worldTop
-          )
-          .map((node) => node.id)
-      );
+      const nextNodeIds = nodeBounds
+        .filter(
+          (node) =>
+            node.left < worldRight &&
+            node.right > worldLeft &&
+            node.top < worldBottom &&
+            node.bottom > worldTop
+        )
+        .map((node) => node.id);
+
+      const nextEdgeIds = edgeGeometry
+        .filter(({ sourceX, sourceY, targetX, targetY }) => {
+          const edgeLeft = Math.min(sourceX, targetX);
+          const edgeRight = Math.max(sourceX, targetX);
+          const edgeTop = Math.min(sourceY, targetY);
+          const edgeBottom = Math.max(sourceY, targetY);
+
+          return (
+            edgeLeft < worldRight &&
+            edgeRight > worldLeft &&
+            edgeTop < worldBottom &&
+            edgeBottom > worldTop
+          );
+        })
+        .map(({ edge }) => edge.id);
+
+      setSelectedNodeIds(nextNodeIds);
+      setSelectedEdgeIds(nextEdgeIds);
     },
-    [activeViewport, nodeBounds]
+    [activeViewport, edgeGeometry, nodeBounds]
   );
 
   const handleBackgroundPointerDown = useCallback(
@@ -601,7 +617,7 @@ export function Canvas<
         return;
       }
 
-      if (event.shiftKey) {
+      if (event.shiftKey && event.button === 0) {
         pointerStateRef.current = {
           mode: "select",
           pointerId: event.pointerId,
@@ -618,13 +634,17 @@ export function Canvas<
           height: 0,
         });
         setSelectedNodeIds([]);
-        setSelectedEdgeId(null);
+        setSelectedEdgeIds([]);
         event.currentTarget.setPointerCapture(event.pointerId);
         return;
       }
 
+      if (event.button !== 0 && event.button !== 1) {
+        return;
+      }
+
       setSelectedNodeIds([]);
-      setSelectedEdgeId(null);
+      setSelectedEdgeIds([]);
 
       pointerStateRef.current = {
         mode: "pan",
@@ -780,9 +800,14 @@ export function Canvas<
         };
       }
 
-      onNodePositionChange?.(pointerState.nodeId, {
-        x: pointerState.startPosition.x + deltaX,
-        y: pointerState.startPosition.y + deltaY,
+      pointerState.nodeIds.forEach((nodeId) => {
+        const startPosition = pointerState.startPositions.get(nodeId);
+        if (!startPosition) return;
+
+        onNodePositionChange?.(nodeId, {
+          x: startPosition.x + deltaX,
+          y: startPosition.y + deltaY,
+        });
       });
     },
     [
@@ -875,7 +900,7 @@ export function Canvas<
       }
 
       if (pointerState.mode === "drag" && pointerState.moved) {
-        suppressClickRef.current = pointerState.nodeId;
+        suppressClickRef.current = pointerState.nodeIds.join("|");
       }
 
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -986,18 +1011,26 @@ export function Canvas<
         return;
       }
 
-      if (selectedEdgeId) {
+      if (selectedEdgeIds.length > 0) {
         event.preventDefault();
-        onDeleteEdge?.(selectedEdgeId);
-        setSelectedEdgeId(null);
+        selectedEdgeIds.forEach((edgeId) => {
+          onDeleteEdge?.(edgeId);
+        });
+        setSelectedEdgeIds([]);
+      }
+
+      if (
+        selectedNodeIds.length === 0 &&
+        selectedEdgeIds.length === 0
+      ) {
         return;
       }
 
-      if (selectedNodeIds.length === 0) return;
-
-      event.preventDefault();
-      onDeleteNodes?.(selectedNodeIds);
-      setSelectedNodeIds([]);
+      if (selectedNodeIds.length > 0) {
+        event.preventDefault();
+        onDeleteNodes?.(selectedNodeIds);
+        setSelectedNodeIds([]);
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -1005,7 +1038,7 @@ export function Canvas<
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onDeleteEdge, onDeleteNodes, selectedEdgeId, selectedNodeIds]);
+  }, [onDeleteEdge, onDeleteNodes, selectedEdgeIds, selectedNodeIds]);
 
   return (
     <div
@@ -1096,7 +1129,7 @@ export function Canvas<
               targetX,
               targetY,
             });
-            const isSelected = selectedEdgeId === edge.id;
+            const isSelected = selectedEdgeIds.includes(edge.id);
 
             if (EdgeComponent) {
               return (
@@ -1121,8 +1154,24 @@ export function Canvas<
                     }}
                     onClick={(event) => {
                       event.stopPropagation();
-                      setSelectedNodeIds([]);
-                      setSelectedEdgeId(edge.id);
+                      const multiSelect =
+                        event.shiftKey ||
+                        event.metaKey ||
+                        event.ctrlKey;
+
+                      setSelectedEdgeIds((prev) => {
+                        if (multiSelect) {
+                          return prev.includes(edge.id)
+                            ? prev.filter((id) => id !== edge.id)
+                            : [...prev, edge.id];
+                        }
+
+                        return [edge.id];
+                      });
+
+                      if (!multiSelect) {
+                        setSelectedNodeIds([]);
+                      }
                     }}
                     onPointerDown={(event) => {
                       if (!isSelected) return;
@@ -1222,8 +1271,24 @@ export function Canvas<
                   }}
                   onClick={(event) => {
                     event.stopPropagation();
-                    setSelectedNodeIds([]);
-                    setSelectedEdgeId(edge.id);
+                    const multiSelect =
+                      event.shiftKey ||
+                      event.metaKey ||
+                      event.ctrlKey;
+
+                    setSelectedEdgeIds((prev) => {
+                      if (multiSelect) {
+                        return prev.includes(edge.id)
+                          ? prev.filter((id) => id !== edge.id)
+                          : [...prev, edge.id];
+                      }
+
+                      return [edge.id];
+                    });
+
+                    if (!multiSelect) {
+                      setSelectedNodeIds([]);
+                    }
                   }}
                 />
               </g>
@@ -1258,20 +1323,41 @@ export function Canvas<
               onPointerDown={(event) => {
                 event.stopPropagation();
 
+                const isAlreadySelected = selectedNodeIds.includes(node.id);
+                const dragNodeIds = isAlreadySelected
+                  ? selectedNodeIds
+                  : [node.id];
+                const startPositions = new Map<string, NodePosition>();
+
+                nodes.forEach((candidateNode) => {
+                  if (!dragNodeIds.includes(candidateNode.id)) return;
+                  startPositions.set(candidateNode.id, candidateNode.position);
+                });
+
                 pointerStateRef.current = {
                   mode: "drag",
                   pointerId: event.pointerId,
-                  nodeId: node.id,
+                  nodeIds: dragNodeIds,
                   startClientX: event.clientX,
                   startClientY: event.clientY,
-                  startPosition: node.position,
+                  startPositions,
                   moved: false,
                 };
+
+                if (!isAlreadySelected) {
+                  setSelectedNodeIds([node.id]);
+                  setSelectedEdgeIds([]);
+                }
 
                 event.currentTarget.setPointerCapture(event.pointerId);
               }}
               onClick={(event) => {
-                if (suppressClickRef.current === node.id) {
+                const suppressed =
+                  suppressClickRef.current
+                    ?.split("|")
+                    .includes(node.id) || false;
+
+                if (suppressed) {
                   suppressClickRef.current = null;
                   return;
                 }
@@ -1290,7 +1376,9 @@ export function Canvas<
 
                   return [node.id];
                 });
-                setSelectedEdgeId(null);
+                if (!multiSelect) {
+                  setSelectedEdgeIds([]);
+                }
 
                 if (!multiSelect) {
                   onNodeClick?.(event, node);
