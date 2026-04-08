@@ -125,19 +125,31 @@ export function useWorkflowGraph(
 
   const updateNode = useCallback(
     (id: string, updates: Partial<WorkflowNodeData>) => {
-      setNodes((prev) =>
-        prev.map((node) =>
-          node.id === id
-            ? {
-                ...node,
-                data: {
-                  ...node.data,
-                  ...updates,
-                },
-              }
-            : node
-        )
-      );
+      setNodes((prev) => {
+        let changed = false;
+
+        const next = prev.map((node) => {
+          if (node.id !== id) return node;
+
+          const hasChanges = (
+            Object.keys(updates) as Array<keyof WorkflowNodeData>
+          ).some((key) => node.data[key] !== updates[key]);
+
+          if (!hasChanges) return node;
+
+          changed = true;
+
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              ...updates,
+            },
+          };
+        });
+
+        return changed ? next : prev;
+      });
     },
     []
   );
@@ -148,16 +160,29 @@ export function useWorkflowGraph(
 
   const moveNode = useCallback(
     (id: string, position: WorkflowNode["position"]) => {
-      setNodes((prev) =>
-        prev.map((node) =>
-          node.id === id
-            ? {
-                ...node,
-                position,
-              }
-            : node
-        )
-      );
+      setNodes((prev) => {
+        let changed = false;
+
+        const next = prev.map((node) => {
+          if (node.id !== id) return node;
+
+          if (
+            node.position.x === position.x &&
+            node.position.y === position.y
+          ) {
+            return node;
+          }
+
+          changed = true;
+
+          return {
+            ...node,
+            position,
+          };
+        });
+
+        return changed ? next : prev;
+      });
     },
     []
   );

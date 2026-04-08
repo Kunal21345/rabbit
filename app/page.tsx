@@ -44,7 +44,10 @@ import {
 } from "@/hooks/useWorkflowGraph";
 
 import { useDebounce } from "@/hooks/useDebounce";
-import type { WorkflowGenerationModel } from "@/lib/workflow-generation";
+import {
+  type WorkflowGenerationModel,
+  type WorkflowProvider,
+} from "@/lib/workflow-generation";
 import { cn } from "@/lib/utils";
 
 /* ====================================================== */
@@ -522,47 +525,6 @@ export default function WorkflowBuilder() {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function checkWorkflowGenerationConfig() {
-      try {
-        const response = await fetch(
-          "/api/workflow/generate",
-          {
-            method: "GET",
-          }
-        );
-
-        const payload = await response.json();
-
-        if (cancelled) return;
-
-        if (!response.ok) {
-          setGenerationError(
-            payload.error ||
-              "Workflow generation is not configured."
-          );
-          return;
-        }
-
-        setGenerationError(null);
-      } catch {
-        if (!cancelled) {
-          setGenerationError(
-            "Unable to reach workflow generation backend."
-          );
-        }
-      }
-    }
-
-    checkWorkflowGenerationConfig();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const maxChatbotWidth = useMemo(() => {
     if (contentWidth === 0) {
       return DEFAULT_CHATBOT_WIDTH;
@@ -787,7 +749,9 @@ export default function WorkflowBuilder() {
   const handlePromptSubmit = useCallback(
     async (
       prompt: string,
-      model: WorkflowGenerationModel
+      model: WorkflowGenerationModel,
+      provider: WorkflowProvider,
+      apiKey?: string
     ): Promise<WorkflowSubmitResult> => {
       setGenerationError(null);
       setIsGeneratingWorkflow(true);
@@ -803,6 +767,8 @@ export default function WorkflowBuilder() {
             body: JSON.stringify({
               prompt,
               model,
+              provider,
+              apiKey,
               currentGraph: {
                 nodes: nodesRef.current.map((node) => ({
                   id: node.id,

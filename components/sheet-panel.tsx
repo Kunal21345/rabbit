@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 
 import { generateRule } from "@/llm/generateRule";
 
@@ -55,6 +61,27 @@ type FieldSchema = {
   type: "textarea" | "input";
 };
 
+function areNodeDraftsEqual(
+  left: NodeData | null,
+  right: NodeData | null
+) {
+  if (!left || !right) return left === right;
+
+  return (
+    left.id === right.id &&
+    left.label === right.label &&
+    left.description === right.description &&
+    left.businessRule === right.businessRule &&
+    left.aiRuleDefinition === right.aiRuleDefinition &&
+    left.aiTestRules === right.aiTestRules &&
+    left.comments === right.comments &&
+    left.nextNodeIds.length === right.nextNodeIds.length &&
+    left.nextNodeIds.every(
+      (nodeId, index) => nodeId === right.nextNodeIds[index]
+    )
+  );
+}
+
 /* -------------------------------------------------- */
 /* Schema */
 /* -------------------------------------------------- */
@@ -105,6 +132,7 @@ export function NodeSheet({
   nodes,
 }: NodeSheetProps) {
   const [draft, setDraft] = useState<NodeData | null>(null);
+  const lastSavedDraftRef = useRef<NodeData | null>(null);
 
   const [generating, setGenerating] =
     useState(false);
@@ -116,10 +144,14 @@ export function NodeSheet({
   useEffect(() => {
     if (!node) {
       setDraft(null);
+      lastSavedDraftRef.current = null;
       return;
     }
 
-    setDraft(node);
+    lastSavedDraftRef.current = node;
+    setDraft((current) =>
+      areNodeDraftsEqual(current, node) ? current : node
+    );
   }, [node]);
 
   /* -------------------------------------------------- */
@@ -128,9 +160,13 @@ export function NodeSheet({
 
   useEffect(() => {
     if (!draft) return;
+    if (areNodeDraftsEqual(lastSavedDraftRef.current, draft)) {
+      return;
+    }
 
     const timer = setTimeout(() => {
       onSave(draft);
+      lastSavedDraftRef.current = draft;
     }, 500);
 
     return () => clearTimeout(timer);
@@ -144,10 +180,12 @@ export function NodeSheet({
     (key: EditableNodeField, value: string) => {
       setDraft((prev) =>
         prev
-          ? {
-              ...prev,
-              [key]: value,
-            }
+          ? prev[key] === value
+            ? prev
+            : {
+                ...prev,
+                [key]: value,
+              }
           : prev
       );
     },

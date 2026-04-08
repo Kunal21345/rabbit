@@ -9,8 +9,10 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { ArrowUpIcon, SquarePen } from "lucide-react";
+import { ArrowUpIcon, Settings2Icon, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   InputGroup,
   InputGroupAddon,
@@ -18,6 +20,13 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Tooltip,
   TooltipContent,
@@ -31,7 +40,12 @@ import {
   PromptInputSelectTrigger,
   PromptInputSelectValue,
 } from "@/components/ai-elements/prompt-input";
-import type { WorkflowGenerationModel } from "@/lib/workflow-generation";
+import {
+  LLM_PROVIDER_API_KEYS_STORAGE_KEY,
+  LLM_PROVIDER_STORAGE_KEY,
+  type WorkflowGenerationModel,
+  type WorkflowProvider,
+} from "@/lib/workflow-generation";
 
 type ChatRole = "assistant" | "user";
 
@@ -51,32 +65,119 @@ type WorkflowChatbotProps = {
   error?: string | null;
   onSubmit: (
     prompt: string,
-    model: WorkflowGenerationModel
+    model: WorkflowGenerationModel,
+    provider: WorkflowProvider,
+    apiKey?: string
   ) => Promise<SubmitResult>;
 };
 
-const MODELS: Array<{
+const PROVIDERS: Array<{
   label: string;
-  value: WorkflowGenerationModel;
+  value: WorkflowProvider;
 }> = [
-  {
-    label: "GPT OSS 20B",
-    value: "openai/gpt-oss-20b",
-  },
-  {
-    label: "GPT OSS 120B",
-    value: "openai/gpt-oss-120b",
-  },
-  {
-    label: "Llama 3.3 70B",
-    value: "llama-3.3-70b-versatile",
-  },
+  { label: "OpenAI", value: "openai" },
+  { label: "Claude", value: "claude" },
+  { label: "Groq", value: "groq" },
+  { label: "Ollama", value: "ollama" },
 ];
 
-function createMessage(
-  role: ChatRole,
-  content: string
-): ChatMessage {
+const MODELS_BY_PROVIDER: Record<
+  WorkflowProvider,
+  Array<{
+    label: string;
+    value: WorkflowGenerationModel;
+  }>
+> = {
+  openai: [{ label: "GPT-4.1 Mini", value: "gpt-4.1-mini" }],
+  claude: [
+    {
+      label: "Claude 3.5 Sonnet",
+      value: "claude-3-5-sonnet-latest",
+    },
+  ],
+  groq: [
+    { label: "GPT OSS 20B", value: "openai/gpt-oss-20b" },
+    { label: "GPT OSS 120B", value: "openai/gpt-oss-120b" },
+    { label: "Llama 3.3 70B", value: "llama-3.3-70b-versatile" },
+  ],
+  ollama: [{ label: "Llama 3.2 3B", value: "llama3.2:3b" }],
+};
+
+type ProviderApiKeyMap = Record<WorkflowProvider, string>;
+
+function emptyProviderApiKeys(): ProviderApiKeyMap {
+  return {
+    openai: "",
+    claude: "",
+    groq: "",
+    ollama: "",
+  };
+}
+
+function getStoredProvider(): WorkflowProvider {
+  if (typeof window === "undefined") {
+    return "groq";
+  }
+
+  const stored = localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
+
+  if (
+    stored === "openai" ||
+    stored === "claude" ||
+    stored === "groq" ||
+    stored === "ollama"
+  ) {
+    return stored;
+  }
+
+  return "groq";
+}
+
+function getStoredProviderApiKeys(): ProviderApiKeyMap {
+  if (typeof window === "undefined") {
+    return emptyProviderApiKeys();
+  }
+
+  try {
+    const raw = localStorage.getItem(LLM_PROVIDER_API_KEYS_STORAGE_KEY);
+
+    if (!raw) {
+      return emptyProviderApiKeys();
+    }
+
+    const parsed = JSON.parse(raw) as Partial<ProviderApiKeyMap>;
+
+    return {
+      openai: parsed.openai?.trim() || "",
+      claude: parsed.claude?.trim() || "",
+      groq: parsed.groq?.trim() || "",
+      ollama: parsed.ollama?.trim() || "",
+    };
+  } catch {
+    return emptyProviderApiKeys();
+  }
+}
+
+function getDefaultModel(provider: WorkflowProvider): WorkflowGenerationModel {
+  return MODELS_BY_PROVIDER[provider][0].value;
+}
+
+function getModelForProvider(
+  provider: WorkflowProvider,
+  currentModel: WorkflowGenerationModel
+): WorkflowGenerationModel {
+  const supportedModels = MODELS_BY_PROVIDER[provider];
+
+  if (
+    supportedModels.some((candidate) => candidate.value === currentModel)
+  ) {
+    return currentModel;
+  }
+
+  return getDefaultModel(provider);
+}
+
+function createMessage(role: ChatRole, content: string): ChatMessage {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role,
@@ -95,22 +196,33 @@ export function WorkflowChatbot({
   onSubmit,
 }: WorkflowChatbotProps) {
   const [draft, setDraft] = useState("");
-  const [model, setModel] =
-    useState<WorkflowGenerationModel>("openai/gpt-oss-120b");
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    INITIAL_MESSAGE,
-  ]);
+  const [provider, setProvider] =
+    useState<WorkflowProvider>(getStoredProvider);
+  const [model, setModel] = useState<WorkflowGenerationModel>(() =>
+    getDefaultModel(getStoredProvider())
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [providerApiKeys, setProviderApiKeys] =
+    useState<ProviderApiKeyMap>(getStoredProviderApiKeys);
+  const [settingsProvider, setSettingsProvider] =
+    useState<WorkflowProvider>(provider);
+  const [settingsProviderApiKeys, setSettingsProviderApiKeys] =
+    useState<ProviderApiKeyMap>(providerApiKeys);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
 
   const canSubmit = useMemo(() => {
     return Boolean(draft.trim()) && !loading;
   }, [draft, loading]);
 
+  const modelOptions = MODELS_BY_PROVIDER[provider];
+
   useEffect(() => {
     const viewport =
       scrollAreaRef.current?.querySelector<HTMLDivElement>(
         '[data-slot="scroll-area-viewport"]'
       ) ?? null;
+
     if (!viewport) return;
 
     viewport.scrollTo({
@@ -125,18 +237,20 @@ export function WorkflowChatbot({
     if (!prompt || loading) return;
 
     setDraft("");
-    setMessages((current) => [
-      ...current,
-      createMessage("user", prompt),
-    ]);
+    setMessages((current) => [...current, createMessage("user", prompt)]);
 
-    const result = await onSubmit(prompt, model);
+    const result = await onSubmit(
+      prompt,
+      model,
+      provider,
+      providerApiKeys[provider] || undefined
+    );
 
     setMessages((current) => [
       ...current,
       createMessage("assistant", result.message),
     ]);
-  }, [draft, loading, model, onSubmit]);
+  }, [draft, loading, model, onSubmit, provider, providerApiKeys]);
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -162,6 +276,34 @@ export function WorkflowChatbot({
     setMessages([INITIAL_MESSAGE]);
   }, [loading]);
 
+  const handleOpenSettings = useCallback(() => {
+    setSettingsProvider(provider);
+    setSettingsProviderApiKeys(providerApiKeys);
+    setSettingsOpen(true);
+  }, [provider, providerApiKeys]);
+
+  const handleProviderChange = useCallback((nextProvider: WorkflowProvider) => {
+    setProvider(nextProvider);
+    setModel((currentModel) => getModelForProvider(nextProvider, currentModel));
+    localStorage.setItem(LLM_PROVIDER_STORAGE_KEY, nextProvider);
+  }, []);
+
+  const handleSaveSettings = useCallback(() => {
+    const nextProviderApiKeys = {
+      ...settingsProviderApiKeys,
+      [settingsProvider]: settingsProviderApiKeys[settingsProvider].trim(),
+    };
+
+    setProviderApiKeys(nextProviderApiKeys);
+    localStorage.setItem(
+      LLM_PROVIDER_API_KEYS_STORAGE_KEY,
+      JSON.stringify(nextProviderApiKeys)
+    );
+
+    handleProviderChange(settingsProvider);
+    setSettingsOpen(false);
+  }, [handleProviderChange, settingsProvider, settingsProviderApiKeys]);
+
   return (
     <div className="h-full w-full">
       <section className="flex h-full w-full flex-col overflow-hidden bg-background">
@@ -172,24 +314,43 @@ export function WorkflowChatbot({
             </p>
           </div>
 
-          <TooltipProvider delayDuration={100}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleResetChat}
-                  disabled={loading}
-                  aria-label="Reset chat"
-                  className="rounded-sm text-muted-foreground"
-                >
-                  <SquarePen data-icon="inline-start" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Reset chat</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <div className="flex items-center gap-1">
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Chatbot settings"
+                    className="rounded-sm text-muted-foreground"
+                    onClick={handleOpenSettings}
+                  >
+                    <Settings2Icon data-icon="inline-start" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Settings</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetChat}
+                    disabled={loading}
+                    aria-label="Reset chat"
+                    className="rounded-sm text-muted-foreground"
+                  >
+                    <SquarePen data-icon="inline-start" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Reset chat</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </header>
 
         <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
@@ -198,9 +359,7 @@ export function WorkflowChatbot({
               <div
                 key={message.id}
                 className={`flex gap-2 ${
-                  message.role === "user"
-                    ? "justify-end"
-                    : "justify-start"
+                  message.role === "user" ? "justify-end" : "justify-start"
                 }`}
               >
                 {message.role === "assistant" ? (
@@ -255,7 +414,7 @@ export function WorkflowChatbot({
                 </PromptInputSelectTrigger>
 
                 <PromptInputSelectContent>
-                  {MODELS.map((option) => (
+                  {modelOptions.map((option) => (
                     <PromptInputSelectItem key={option.value} value={option.value}>
                       {option.label}
                     </PromptInputSelectItem>
@@ -283,11 +442,85 @@ export function WorkflowChatbot({
             </InputGroupAddon>
           </InputGroup>
 
-          {error ? (
-            <p className="mt-2 text-xs text-destructive">{error}</p>
-          ) : null}
+          {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
         </form>
       </section>
+
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent side="right">
+          <SheetHeader>
+            <SheetTitle>LLM Settings</SheetTitle>
+            <SheetDescription>
+              Choose provider and configure the API key for that provider.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex flex-col gap-4 p-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="llm-provider">API provider</Label>
+              <PromptInputSelect
+                value={settingsProvider}
+                onValueChange={(value) =>
+                  setSettingsProvider(value as WorkflowProvider)
+                }
+              >
+                <PromptInputSelectTrigger id="llm-provider" className="h-9 w-full rounded-md">
+                  <PromptInputSelectValue />
+                </PromptInputSelectTrigger>
+                <PromptInputSelectContent>
+                  {PROVIDERS.map((option) => (
+                    <PromptInputSelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </PromptInputSelectItem>
+                  ))}
+                </PromptInputSelectContent>
+              </PromptInputSelect>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="llm-api-key">
+                {PROVIDERS.find((candidate) => candidate.value === settingsProvider)
+                  ?.label || "Provider"}{" "}
+                API key
+              </Label>
+              <Input
+                id="llm-api-key"
+                type="password"
+                value={settingsProviderApiKeys[settingsProvider]}
+                onChange={(event) => {
+                  const nextValue = event.currentTarget.value;
+
+                  setSettingsProviderApiKeys((current) => ({
+                    ...current,
+                    [settingsProvider]: nextValue,
+                  }));
+                }}
+                placeholder={
+                  settingsProvider === "openai"
+                    ? "sk-..."
+                    : settingsProvider === "claude"
+                      ? "sk-ant-..."
+                      : settingsProvider === "groq"
+                        ? "gsk_..."
+                        : "Optional for local Ollama"
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Stored locally in this browser and sent only to your workflow generation API route.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setSettingsOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={handleSaveSettings}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

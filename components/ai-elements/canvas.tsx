@@ -432,6 +432,10 @@ export function Canvas<
     (activeColorMode === "dark"
       ? "hsl(222 18% 8%)"
       : "hsl(210 40% 98%)");
+  const canvasGridBackgroundImage =
+    activeColorMode === "dark"
+      ? "radial-gradient(circle at center, rgba(255,255,255,0.12) 0 1.2px, transparent 1.3px)"
+      : "radial-gradient(circle at center, rgba(15,23,42,0.14) 0 1.2px, transparent 1.3px)";
 
   const edgeGeometry = useMemo(() => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -1054,6 +1058,10 @@ export function Canvas<
         overflow: "hidden",
         position: "relative",
         backgroundColor: canvasBackgroundColor,
+        backgroundImage: canvasGridBackgroundImage,
+        backgroundRepeat: "repeat",
+        backgroundPosition: "0 0",
+        backgroundSize: "22px 22px",
         touchAction: "none",
         ...style,
       }}
@@ -1076,37 +1084,12 @@ export function Canvas<
           inset: 0,
           transform: `translate(${activeViewport.x}px, ${activeViewport.y}px) scale(${activeViewport.zoom})`,
           transformOrigin: "0 0",
-          willChange: "transform",
+          willChange: isZoomTransitioning ? "transform" : "auto",
           transition: isZoomTransitioning
             ? `transform ${ZOOM_TRANSITION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)`
             : "none",
         }}
       >
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            left: -4000,
-            top: -4000,
-            width: 8000,
-            height: 8000,
-            pointerEvents: "none",
-            backgroundColor: canvasBackgroundColor,
-            backgroundImage:
-              activeColorMode === "dark"
-                ? [
-                    "radial-gradient(circle at center, rgba(255,255,255,0.12) 0 1.2px, transparent 1.3px)",
-                    "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0))",
-                  ].join(", ")
-                : [
-                    "radial-gradient(circle at center, rgba(15,23,42,0.14) 0 1.2px, transparent 1.3px)",
-                    "linear-gradient(180deg, rgba(255,255,255,0.92), rgba(248,250,252,0.96))",
-                  ].join(", "),
-            backgroundRepeat: "repeat, no-repeat",
-            backgroundPosition: "0 0, 0 0",
-            backgroundSize: "22px 22px, 100% 100%",
-          }}
-        />
         <svg
           width="100%"
           height="100%"

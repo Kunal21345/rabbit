@@ -7,11 +7,26 @@ import type {
 export type WorkflowGenerationModel =
   | "openai/gpt-oss-20b"
   | "openai/gpt-oss-120b"
-  | "llama-3.3-70b-versatile";
+  | "llama-3.3-70b-versatile"
+  | "gpt-4.1-mini"
+  | "claude-3-5-sonnet-latest"
+  | "llama3.2:3b";
+
+export const LLM_PROVIDER_STORAGE_KEY = "workflow-llm-provider";
+export const LLM_PROVIDER_API_KEYS_STORAGE_KEY =
+  "workflow-llm-provider-api-keys";
+
+export type WorkflowProvider =
+  | "openai"
+  | "claude"
+  | "groq"
+  | "ollama";
 
 export type WorkflowGenerationRequest = {
   prompt: string;
   model: WorkflowGenerationModel;
+  provider?: WorkflowProvider;
+  apiKey?: string;
   currentGraph?: {
     nodes: Array<{
       id: string;
@@ -153,20 +168,33 @@ export function normalizeGeneratedWorkflow(
   workflow: GeneratedWorkflow
 ): GeneratedWorkflow {
   const usedIds = new Set<string>();
+  const asText = (value: unknown) =>
+    typeof value === "string" ? value.trim() : "";
 
-  const nodes = workflow.nodes.map((node, index) => {
-    const baseId = slugify(node.id || node.label || `step-${index + 1}`);
+  const rawNodes = Array.isArray(workflow.nodes)
+    ? workflow.nodes
+    : [];
+  const rawEdges = Array.isArray(workflow.edges)
+    ? workflow.edges
+    : [];
+
+  const nodes = rawNodes.map((node, index) => {
+    const labelText = asText(node?.label);
+    const baseId = slugify(
+      asText(node?.id) ||
+        labelText ||
+        `step-${index + 1}`
+    );
     const id = dedupeId(baseId, usedIds);
 
     return {
-      ...node,
       id,
-      label: node.label.trim() || `Step ${index + 1}`,
-      description: node.description.trim(),
-      businessRule: node.businessRule.trim(),
-      aiRuleDefinition: node.aiRuleDefinition.trim(),
-      aiTestRules: node.aiTestRules.trim(),
-      comments: node.comments.trim(),
+      label: labelText || `Step ${index + 1}`,
+      description: asText(node?.description),
+      businessRule: asText(node?.businessRule),
+      aiRuleDefinition: asText(node?.aiRuleDefinition),
+      aiTestRules: asText(node?.aiTestRules),
+      comments: asText(node?.comments),
     };
   });
 
@@ -174,24 +202,34 @@ export function normalizeGeneratedWorkflow(
   const seenEdges = new Set<string>();
   const edges: GeneratedWorkflowEdge[] = [];
 
-  for (const edge of workflow.edges) {
-    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
+  for (const edge of rawEdges) {
+    const source = asText(edge?.source);
+    const target = asText(edge?.target);
+
+    if (!source || !target) {
       continue;
     }
 
-    const edgeKey = `${edge.source}:${edge.target}`;
+    if (!nodeIds.has(source) || !nodeIds.has(target)) {
+      continue;
+    }
+
+    const edgeKey = `${source}:${target}`;
 
     if (seenEdges.has(edgeKey)) {
       continue;
     }
 
     seenEdges.add(edgeKey);
-    edges.push(edge);
+    edges.push({
+      source,
+      target,
+    });
   }
 
   return {
-    title: workflow.title.trim(),
-    summary: workflow.summary.trim(),
+    title: asText(workflow?.title),
+    summary: asText(workflow?.summary),
     nodes,
     edges,
   };
