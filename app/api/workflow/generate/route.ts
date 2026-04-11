@@ -5,6 +5,9 @@ import type {
   WorkflowProvider,
 } from "@/lib/workflow-generation";
 import {
+  getDefaultWorkflowModel,
+  isWorkflowGenerationModel,
+  isWorkflowProvider,
   WORKFLOW_GENERATION_SCHEMA,
   buildWorkflowGraph,
 } from "@/lib/workflow-generation";
@@ -16,6 +19,7 @@ const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const OLLAMA_API_URL =
   process.env.OLLAMA_API_URL || "http://localhost:11434/api/chat";
+const PROVIDER_TIMEOUT_MS = 30000;
 
 const MISSING_API_KEY_MESSAGES: Record<
   Exclude<WorkflowProvider, "ollama">,
@@ -38,16 +42,73 @@ function supportsStrictStructuredOutputs(model: string) {
 }
 
 function normalizeProvider(provider: unknown): WorkflowProvider {
-  if (
-    provider === "openai" ||
-    provider === "claude" ||
-    provider === "groq" ||
-    provider === "ollama"
-  ) {
+  if (isWorkflowProvider(provider)) {
     return provider;
   }
 
   return "groq";
+}
+
+function sanitizeText(value: unknown, maxLength = 4000) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, maxLength);
+}
+
+function normalizeRequest(
+  payload: unknown
+): WorkflowGenerationRequest | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const provider = normalizeProvider(record.provider);
+  const model = isWorkflowGenerationModel(record.model)
+    ? record.model
+    : getDefaultWorkflowModel(provider);
+
+  const currentGraph =
+    typeof record.currentGraph === "object" &&
+    record.currentGraph !== null
+      ? {
+          nodes: Array.isArray((record.currentGraph as Record<string, unknown>).nodes)
+            ? ((record.currentGraph as Record<string, unknown>).nodes as unknown[])
+                .filter(
+                  (node): node is Record<string, unknown> =>
+                    typeof node === "object" && node !== null
+                )
+                .map((node) => ({
+                  id: sanitizeText(node.id, 120),
+                  label: sanitizeText(node.label, 200),
+                  description: sanitizeText(node.description, 1000),
+                  businessRule: sanitizeText(node.businessRule, 2000),
+                }))
+            : [],
+          edges: Array.isArray((record.currentGraph as Record<string, unknown>).edges)
+            ? ((record.currentGraph as Record<string, unknown>).edges as unknown[])
+                .filter(
+                  (edge): edge is Record<string, unknown> =>
+                    typeof edge === "object" && edge !== null
+                )
+                .map((edge) => ({
+                  source: sanitizeText(edge.source, 120),
+                  target: sanitizeText(edge.target, 120),
+                }))
+                .filter((edge) => edge.source && edge.target)
+            : [],
+        }
+      : undefined;
+
+  return {
+    prompt: sanitizeText(record.prompt, 8000),
+    model,
+    provider,
+    apiKey: sanitizeText(record.apiKey, 500),
+    currentGraph,
+  };
 }
 
 function resolveApiKey(
@@ -227,7 +288,7 @@ async function requestGroq(
             } as const)
           : undefined;
 
-    const response = await fetch(GROQ_API_URL, {
+    const response = await fetchWithTimeout(GROQ_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -332,7 +393,7 @@ async function requestOpenAI(
   payload: WorkflowGenerationRequest,
   apiKey: string
 ) {
-  const response = await fetch(OPENAI_API_URL, {
+  const response = await fetchWithTimeout(OPENAI_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -382,7 +443,7 @@ async function requestClaude(
   payload: WorkflowGenerationRequest,
   apiKey: string
 ) {
-  const response = await fetch(CLAUDE_API_URL, {
+  const response = await fetchWithTimeout(CLAUDE_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -414,7 +475,7 @@ async function requestClaude(
 }
 
 async function requestOllama(payload: WorkflowGenerationRequest) {
-  const response = await fetch(OLLAMA_API_URL, {
+  const response = await fetchWithTimeout(OLLAMA_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -450,14 +511,25 @@ async function requestOllama(payload: WorkflowGenerationRequest) {
 }
 
 export async function POST(request: Request) {
-  let payload: WorkflowGenerationRequest;
+  let rawPayload: unknown;
 
   try {
-    payload = (await request.json()) as WorkflowGenerationRequest;
+    rawPayload = await request.json();
   } catch {
     return NextResponse.json(
       {
         error: "Invalid request body.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const payload = normalizeRequest(rawPayload);
+
+  if (!payload) {
+    return NextResponse.json(
+      {
+        error: "Request payload must be a JSON object.",
       },
       { status: 400 }
     );
@@ -525,6 +597,29 @@ export async function POST(request: Request) {
       },
       { status: 500 }
     );
+  }
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Provider request timed out.");
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

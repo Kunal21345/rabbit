@@ -8,10 +8,7 @@ import {
   useRef,
 } from "react";
 
-import { generateRule } from "@/llm/generateRule";
-
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -134,9 +131,6 @@ export function NodeSheet({
   const [draft, setDraft] = useState<NodeData | null>(null);
   const lastSavedDraftRef = useRef<NodeData | null>(null);
 
-  const [generating, setGenerating] =
-    useState(false);
-
   /* -------------------------------------------------- */
   /* Sync */
   /* -------------------------------------------------- */
@@ -191,36 +185,6 @@ export function NodeSheet({
     },
     []
   );
-
-  /* -------------------------------------------------- */
-  /* Generate AI */
-  /* -------------------------------------------------- */
-
-  const handleGenerate = useCallback(async () => {
-    if (!draft?.businessRule.trim()) return;
-
-    setGenerating(true);
-
-    try {
-      const result = await generateRule(
-        draft.businessRule
-      );
-
-      setDraft((prev) =>
-        prev
-          ? {
-              ...prev,
-              aiRuleDefinition:
-                result.ruleDefinition,
-              aiTestRules:
-                result.testCases,
-            }
-          : prev
-      );
-    } finally {
-      setGenerating(false);
-    }
-  }, [draft]);
 
   /* -------------------------------------------------- */
   /* Options */
@@ -281,20 +245,11 @@ export function NodeSheet({
           />
         )}
 
-        {field.key === "businessRule" && (
-          <Button
-            type="button"
-            onClick={handleGenerate}
-            disabled={generating}
-            variant="secondary"
-            size="sm"
-            className="w-fit"
-          >
-            {generating
-              ? "Generating..."
-              : "Generate AI"}
-          </Button>
-        )}
+        {field.key === "businessRule" ? (
+          <p className="text-xs text-muted-foreground">
+            Describe the business intent here. Generated rule and test fields can be edited directly when needed.
+          </p>
+        ) : null}
       </div>
     );
   };

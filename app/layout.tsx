@@ -3,8 +3,8 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
-  title: "Workflow App",
-  description: "Dark mode enabled app",
+  title: "AI Workflow Builder",
+  description: "Design, edit, and refine workflow graphs with AI-assisted generation.",
 };
 
 export default function RootLayout({

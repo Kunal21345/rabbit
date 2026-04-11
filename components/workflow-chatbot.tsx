@@ -41,8 +41,12 @@ import {
   PromptInputSelectValue,
 } from "@/components/ai-elements/prompt-input";
 import {
+  getDefaultWorkflowModel,
+  isWorkflowProvider,
   LLM_PROVIDER_API_KEYS_STORAGE_KEY,
   LLM_PROVIDER_STORAGE_KEY,
+  WORKFLOW_MODEL_OPTIONS_BY_PROVIDER,
+  WORKFLOW_PROVIDER_OPTIONS,
   type WorkflowGenerationModel,
   type WorkflowProvider,
 } from "@/lib/workflow-generation";
@@ -71,38 +75,6 @@ type WorkflowChatbotProps = {
   ) => Promise<SubmitResult>;
 };
 
-const PROVIDERS: Array<{
-  label: string;
-  value: WorkflowProvider;
-}> = [
-  { label: "OpenAI", value: "openai" },
-  { label: "Claude", value: "claude" },
-  { label: "Groq", value: "groq" },
-  { label: "Ollama", value: "ollama" },
-];
-
-const MODELS_BY_PROVIDER: Record<
-  WorkflowProvider,
-  Array<{
-    label: string;
-    value: WorkflowGenerationModel;
-  }>
-> = {
-  openai: [{ label: "GPT-4.1 Mini", value: "gpt-4.1-mini" }],
-  claude: [
-    {
-      label: "Claude 3.5 Sonnet",
-      value: "claude-3-5-sonnet-latest",
-    },
-  ],
-  groq: [
-    { label: "GPT OSS 20B", value: "openai/gpt-oss-20b" },
-    { label: "GPT OSS 120B", value: "openai/gpt-oss-120b" },
-    { label: "Llama 3.3 70B", value: "llama-3.3-70b-versatile" },
-  ],
-  ollama: [{ label: "Llama 3.2 3B", value: "llama3.2:3b" }],
-};
-
 type ProviderApiKeyMap = Record<WorkflowProvider, string>;
 
 function emptyProviderApiKeys(): ProviderApiKeyMap {
@@ -121,12 +93,7 @@ function getStoredProvider(): WorkflowProvider {
 
   const stored = localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
 
-  if (
-    stored === "openai" ||
-    stored === "claude" ||
-    stored === "groq" ||
-    stored === "ollama"
-  ) {
+  if (isWorkflowProvider(stored)) {
     return stored;
   }
 
@@ -159,14 +126,14 @@ function getStoredProviderApiKeys(): ProviderApiKeyMap {
 }
 
 function getDefaultModel(provider: WorkflowProvider): WorkflowGenerationModel {
-  return MODELS_BY_PROVIDER[provider][0].value;
+  return getDefaultWorkflowModel(provider);
 }
 
 function getModelForProvider(
   provider: WorkflowProvider,
   currentModel: WorkflowGenerationModel
 ): WorkflowGenerationModel {
-  const supportedModels = MODELS_BY_PROVIDER[provider];
+  const supportedModels = WORKFLOW_MODEL_OPTIONS_BY_PROVIDER[provider];
 
   if (
     supportedModels.some((candidate) => candidate.value === currentModel)
@@ -215,7 +182,7 @@ export function WorkflowChatbot({
     return Boolean(draft.trim()) && !loading;
   }, [draft, loading]);
 
-  const modelOptions = MODELS_BY_PROVIDER[provider];
+  const modelOptions = WORKFLOW_MODEL_OPTIONS_BY_PROVIDER[provider];
 
   useEffect(() => {
     const viewport =
@@ -468,7 +435,7 @@ export function WorkflowChatbot({
                   <PromptInputSelectValue />
                 </PromptInputSelectTrigger>
                 <PromptInputSelectContent>
-                  {PROVIDERS.map((option) => (
+                  {WORKFLOW_PROVIDER_OPTIONS.map((option) => (
                     <PromptInputSelectItem key={option.value} value={option.value}>
                       {option.label}
                     </PromptInputSelectItem>
@@ -479,7 +446,7 @@ export function WorkflowChatbot({
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="llm-api-key">
-                {PROVIDERS.find((candidate) => candidate.value === settingsProvider)
+                {WORKFLOW_PROVIDER_OPTIONS.find((candidate) => candidate.value === settingsProvider)
                   ?.label || "Provider"}{" "}
                 API key
               </Label>

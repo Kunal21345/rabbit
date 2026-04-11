@@ -22,6 +22,56 @@ export type WorkflowProvider =
   | "groq"
   | "ollama";
 
+export const WORKFLOW_PROVIDER_OPTIONS: Array<{
+  label: string;
+  value: WorkflowProvider;
+}> = [
+  { label: "OpenAI", value: "openai" },
+  { label: "Claude", value: "claude" },
+  { label: "Groq", value: "groq" },
+  { label: "Ollama", value: "ollama" },
+];
+
+export const WORKFLOW_MODEL_OPTIONS_BY_PROVIDER: Record<
+  WorkflowProvider,
+  Array<{
+    label: string;
+    value: WorkflowGenerationModel;
+  }>
+> = {
+  openai: [{ label: "GPT-4.1 Mini", value: "gpt-4.1-mini" }],
+  claude: [
+    {
+      label: "Claude 3.5 Sonnet",
+      value: "claude-3-5-sonnet-latest",
+    },
+  ],
+  groq: [
+    { label: "GPT OSS 20B", value: "openai/gpt-oss-20b" },
+    { label: "GPT OSS 120B", value: "openai/gpt-oss-120b" },
+    { label: "Llama 3.3 70B", value: "llama-3.3-70b-versatile" },
+  ],
+  ollama: [{ label: "Llama 3.2 3B", value: "llama3.2:3b" }],
+};
+
+export function isWorkflowProvider(value: unknown): value is WorkflowProvider {
+  return WORKFLOW_PROVIDER_OPTIONS.some((provider) => provider.value === value);
+}
+
+export function isWorkflowGenerationModel(
+  value: unknown
+): value is WorkflowGenerationModel {
+  return Object.values(WORKFLOW_MODEL_OPTIONS_BY_PROVIDER)
+    .flat()
+    .some((model) => model.value === value);
+}
+
+export function getDefaultWorkflowModel(
+  provider: WorkflowProvider
+): WorkflowGenerationModel {
+  return WORKFLOW_MODEL_OPTIONS_BY_PROVIDER[provider][0].value;
+}
+
 export type WorkflowGenerationRequest = {
   prompt: string;
   model: WorkflowGenerationModel;
