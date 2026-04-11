@@ -45,10 +45,8 @@ type NodeSheetPayload = {
   id: string;
   label: string;
   description: string;
-  businessRule: string;
-  aiRuleDefinition: string;
-  aiTestRules: string;
-  comments: string;
+  details: string;
+  suggestions: string;
   nextNodeIds: string[];
 };
 
@@ -67,10 +65,8 @@ const initialNodes: WorkflowNode[] = [
     data: {
       label: "Start",
       description: "Initialize workflow",
-      businessRule: "",
-      aiRuleDefinition: "",
-      aiTestRules: "",
-      comments: "",
+      details: "",
+      suggestions: "",
       handles: {
         source: true,
         target: false,
@@ -84,10 +80,8 @@ const initialNodes: WorkflowNode[] = [
     data: {
       label: "Sample Node",
       description: "Evaluate the workflow input",
-      businessRule: "",
-      aiRuleDefinition: "",
-      aiTestRules: "",
-      comments: "",
+      details: "",
+      suggestions: "",
       handles: {
         source: true,
         target: true,
@@ -101,10 +95,8 @@ const initialNodes: WorkflowNode[] = [
     data: {
       label: "Sample Node 2",
       description: "Complete the workflow",
-      businessRule: "",
-      aiRuleDefinition: "",
-      aiTestRules: "",
-      comments: "",
+      details: "",
+      suggestions: "",
       handles: {
         source: false,
         target: true,
@@ -187,7 +179,7 @@ const WorkflowNodeRenderer = memo(
 
         <NodeContent>
           <p className="text-xs">
-            {data.businessRule || "Workflow Step"}
+            {data.details || "Workflow Step"}
           </p>
         </NodeContent>
       </CustomNode>
@@ -310,11 +302,8 @@ export default function WorkflowBuilder() {
       id: node.id,
       label: node.data.label,
       description: node.data.description,
-      businessRule: node.data.businessRule,
-      aiRuleDefinition:
-        node.data.aiRuleDefinition,
-      aiTestRules: node.data.aiTestRules,
-      comments: node.data.comments,
+      details: node.data.details,
+      suggestions: node.data.suggestions,
       nextNodeIds: nodeEdges.map((edge) => edge.target),
     };
   }, [nodes, selectedNodeId, edgeMap]);
@@ -367,11 +356,8 @@ export default function WorkflowBuilder() {
       updateNode(data.id, {
         label: data.label,
         description: data.description,
-        businessRule: data.businessRule,
-        aiRuleDefinition:
-          data.aiRuleDefinition,
-        aiTestRules: data.aiTestRules,
-        comments: data.comments,
+        details: data.details,
+        suggestions: data.suggestions,
       });
     },
     [updateNode]

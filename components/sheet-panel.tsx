@@ -29,10 +29,8 @@ type NodeData = {
   id: string;
   label: string;
   description: string;
-  businessRule: string;
-  aiRuleDefinition: string;
-  aiTestRules: string;
-  comments: string;
+  details: string;
+  suggestions: string;
   nextNodeIds: string[];
 };
 
@@ -68,10 +66,8 @@ function areNodeDraftsEqual(
     left.id === right.id &&
     left.label === right.label &&
     left.description === right.description &&
-    left.businessRule === right.businessRule &&
-    left.aiRuleDefinition === right.aiRuleDefinition &&
-    left.aiTestRules === right.aiTestRules &&
-    left.comments === right.comments &&
+    left.details === right.details &&
+    left.suggestions === right.suggestions &&
     left.nextNodeIds.length === right.nextNodeIds.length &&
     left.nextNodeIds.every(
       (nodeId, index) => nodeId === right.nextNodeIds[index]
@@ -90,26 +86,13 @@ const MAIN_FIELDS: FieldSchema[] = [
     type: "textarea",
   },
   {
-    key: "businessRule",
-    label: "Business Logic",
+    key: "details",
+    label: "Detail of That Step",
     type: "textarea",
   },
   {
-    key: "aiRuleDefinition",
-    label: "Rule Definition (AI Generated)",
-    type: "textarea",
-  },
-  {
-    key: "aiTestRules",
-    label: "Test Cases (AI Generated)",
-    type: "textarea",
-  },
-];
-
-const FOOTER_FIELDS: FieldSchema[] = [
-  {
-    key: "comments",
-    label: "Comments",
+    key: "suggestions",
+    label: "Suggestions to Complete the Step",
     type: "textarea",
   },
 ];
@@ -211,10 +194,6 @@ export function NodeSheet({
   const renderField = (field: FieldSchema) => {
     const id = field.key;
 
-    const isGenerated =
-      field.key === "aiRuleDefinition" ||
-      field.key === "aiTestRules";
-
     return (
       <div className="grid gap-3" key={field.key}>
         <Label htmlFor={id}>{field.label}</Label>
@@ -223,11 +202,7 @@ export function NodeSheet({
           <Textarea
             id={id}
             name={id}
-            className={
-              isGenerated
-                ? "border border-border bg-muted"
-                : FIELD_CLASS
-            }
+            className={FIELD_CLASS}
             value={draft[field.key]}
             onChange={(e) =>
               updateField(field.key, e.target.value)
@@ -245,9 +220,9 @@ export function NodeSheet({
           />
         )}
 
-        {field.key === "businessRule" ? (
+        {field.key === "suggestions" ? (
           <p className="text-xs text-muted-foreground">
-            Describe the business intent here. Generated rule and test fields can be edited directly when needed.
+            Use this area for practical suggestions, prompts, or guidance needed to complete the step.
           </p>
         ) : null}
       </div>
@@ -298,11 +273,6 @@ export function NodeSheet({
         </div>
         <Separator />
 
-        {/* Footer */}
-
-        <div className="grid gap-6 p-6">
-          {FOOTER_FIELDS.map(renderField)}
-        </div>
       </SheetContent>
     </Sheet>
   );

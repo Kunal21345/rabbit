@@ -84,7 +84,8 @@ function normalizeRequest(
                   id: sanitizeText(node.id, 120),
                   label: sanitizeText(node.label, 200),
                   description: sanitizeText(node.description, 1000),
-                  businessRule: sanitizeText(node.businessRule, 2000),
+                  details: sanitizeText(node.details, 2000),
+                  suggestions: sanitizeText(node.suggestions, 2000),
                 }))
             : [],
           edges: Array.isArray((record.currentGraph as Record<string, unknown>).edges)
@@ -166,10 +167,9 @@ function buildPrompt(input: WorkflowGenerationRequest) {
     "Use direct unlabeled edges between nodes.",
     "A node may connect to multiple target nodes when the workflow needs branching.",
     "Prefer explicit start and end nodes when appropriate.",
-    "businessRule should explain what the node does in business terms.",
-    "aiRuleDefinition should be valid JavaScript only when extra rule logic is needed. Otherwise leave it empty.",
-    "aiTestRules should contain concise example cases when useful. Otherwise leave it empty.",
-    "comments can capture assumptions or caveats.",
+    "description should be a short step description.",
+    "details should explain the detail of that step.",
+    "suggestions should provide concise guidance, prompts, or ideas to complete the step.",
     "",
     `User use case:\n${input.prompt}`,
     "",

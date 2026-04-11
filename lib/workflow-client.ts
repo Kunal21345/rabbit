@@ -27,7 +27,8 @@ export async function generateWorkflowGraph(input: {
       id: string;
       label: string;
       description: string;
-      businessRule: string;
+      details: string;
+      suggestions: string;
     }>;
     edges: Array<{
       source: string;

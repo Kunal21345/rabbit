@@ -82,7 +82,8 @@ export type WorkflowGenerationRequest = {
       id: string;
       label: string;
       description: string;
-      businessRule: string;
+      details: string;
+      suggestions: string;
     }>;
     edges: Array<{
       source: string;
@@ -102,10 +103,8 @@ export type GeneratedWorkflowNode = {
   id: string;
   label: string;
   description: string;
-  businessRule: string;
-  aiRuleDefinition: string;
-  aiTestRules: string;
-  comments: string;
+  details: string;
+  suggestions: string;
 };
 
 export type GeneratedWorkflowEdge = {
@@ -144,10 +143,8 @@ export const WORKFLOW_GENERATION_SCHEMA = {
           "id",
           "label",
           "description",
-          "businessRule",
-          "aiRuleDefinition",
-          "aiTestRules",
-          "comments",
+          "details",
+          "suggestions",
         ],
         properties: {
           id: {
@@ -159,16 +156,10 @@ export const WORKFLOW_GENERATION_SCHEMA = {
           description: {
             type: "string",
           },
-          businessRule: {
+          details: {
             type: "string",
           },
-          aiRuleDefinition: {
-            type: "string",
-          },
-          aiTestRules: {
-            type: "string",
-          },
-          comments: {
+          suggestions: {
             type: "string",
           },
         },
@@ -241,10 +232,8 @@ export function normalizeGeneratedWorkflow(
       id,
       label: labelText || `Step ${index + 1}`,
       description: asText(node?.description),
-      businessRule: asText(node?.businessRule),
-      aiRuleDefinition: asText(node?.aiRuleDefinition),
-      aiTestRules: asText(node?.aiTestRules),
-      comments: asText(node?.comments),
+      details: asText(node?.details),
+      suggestions: asText(node?.suggestions),
     };
   });
 
@@ -342,10 +331,8 @@ export function buildWorkflowGraph(
       data: {
         label: node.label,
         description: node.description,
-        businessRule: node.businessRule,
-        aiRuleDefinition: node.aiRuleDefinition,
-        aiTestRules: node.aiTestRules,
-        comments: node.comments,
+        details: node.details,
+        suggestions: node.suggestions,
         handles: {
           source: (outgoingCount.get(node.id) || 0) > 0,
           target: (incomingCount.get(node.id) || 0) > 0,

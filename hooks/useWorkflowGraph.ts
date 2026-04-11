@@ -9,11 +9,8 @@ import { useCallback, useMemo, useState } from "react";
 export type WorkflowNodeData = {
   label: string;
   description: string;
-
-  businessRule: string;
-  aiRuleDefinition: string;
-  aiTestRules: string;
-  comments: string;
+  details: string;
+  suggestions: string;
 
   hidden?: boolean;
 
@@ -86,10 +83,8 @@ export function useWorkflowGraph(
       const defaultData: WorkflowNodeData = {
         label: `Step ${prev.length}`,
         description: "",
-        businessRule: "",
-        aiRuleDefinition: "",
-        aiTestRules: "",
-        comments: "",
+        details: "",
+        suggestions: "",
         handles: {
           source: true,
           target: true,
