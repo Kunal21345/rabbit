@@ -277,6 +277,9 @@ export function Canvas<
   const nodeObserversRef = useRef<Map<string, ResizeObserver>>(
     new Map()
   );
+  const nodeRefCallbacksRef = useRef<
+    Map<string, (element: HTMLDivElement | null) => void>
+  >(new Map());
 
   useLayoutEffect(() => {
     const element = containerRef.current;
@@ -366,9 +369,28 @@ export function Canvas<
     []
   );
 
+  const getNodeRef = useCallback(
+    (nodeId: string) => {
+      const existing = nodeRefCallbacksRef.current.get(nodeId);
+
+      if (existing) {
+        return existing;
+      }
+
+      const callback = (element: HTMLDivElement | null) => {
+        registerNode(nodeId, element);
+      };
+
+      nodeRefCallbacksRef.current.set(nodeId, callback);
+      return callback;
+    },
+    [registerNode]
+  );
+
   useEffect(() => {
     const nodeObservers = nodeObserversRef.current;
     const nodeElements = nodeElementsRef.current;
+    const nodeRefCallbacks = nodeRefCallbacksRef.current;
 
     return () => {
       nodeObservers.forEach((observer) => {
@@ -376,6 +398,7 @@ export function Canvas<
       });
       nodeObservers.clear();
       nodeElements.clear();
+      nodeRefCallbacks.clear();
     };
   }, []);
 
@@ -434,8 +457,8 @@ export function Canvas<
       : "hsl(0, 0%, 100%)");
   const canvasGridBackgroundImage =
     activeColorMode === "dark"
-      ? "radial-gradient(circle at center, rgba(49, 49, 49, 0.67) 0 1.2px, transparent 1.3px)"
-      : "radial-gradient(circle at center, rgba(15,23,42,0.14) 0 1.2px, transparent 1.3px)";
+      ? "radial-gradient(circle at center, rgba(32, 32, 32, 0.67) 0 1px, transparent 1px)"
+      : "radial-gradient(circle at center, rgba(15,23,42,0.14) 0 1px, transparent 1px)";
 
   const edgeGeometry = useMemo(() => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -1082,12 +1105,10 @@ export function Canvas<
         style={{
           position: "absolute",
           inset: 0,
-          transform: `translate(${activeViewport.x}px, ${activeViewport.y}px) scale(${activeViewport.zoom})`,
+          transform: `translate3d(${activeViewport.x}px, ${activeViewport.y}px, 0) scale(${activeViewport.zoom})`,
           transformOrigin: "0 0",
           willChange: isZoomTransitioning ? "transform" : "auto",
-          transition: isZoomTransitioning
-            ? `transform ${ZOOM_TRANSITION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)`
-            : "none",
+          backfaceVisibility: "hidden",
         }}
       >
         <svg
@@ -1302,7 +1323,7 @@ export function Canvas<
           return (
             <div
               key={node.id}
-              ref={(element) => registerNode(node.id, element)}
+              ref={getNodeRef(node.id)}
               onPointerDown={(event) => {
                 event.stopPropagation();
 

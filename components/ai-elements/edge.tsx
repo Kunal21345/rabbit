@@ -22,9 +22,9 @@ const BaseEdge = (props: CanvasEdgeComponentProps) => {
       <path
         d={path}
         fill="none"
-        stroke="currentColor"
-        strokeOpacity={props.selected ? 0.95 : 0.65}
-        strokeWidth={props.selected ? 2.4 : 1.8}
+        stroke="var(--edge-color)"
+        strokeOpacity={props.selected ? 0.95 : 1.0}
+        strokeWidth={props.selected ? 2.4 : 1.0}
       />
     </g>
   );

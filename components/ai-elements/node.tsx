@@ -27,7 +27,7 @@ export const Node = ({
 }: NodeProps) => (
   <Card
     className={cn(
-      "node-container relative size-full h-auto w-sm gap-0 rounded-md p-0 transition-[box-shadow,border-color] duration-150",
+      "node-container relative size-full h-auto w-sm gap-0 rounded-2xl p-0 transition-[box-shadow,border-color] duration-150 overflow-hidden",
       selected &&
         "border-primary shadow-[0_0_0_2px_color-mix(in_oklab,var(--primary)_30%,transparent)]",
       className
@@ -48,7 +48,7 @@ export type NodeHeaderProps = ComponentProps<typeof CardHeader>;
 
 export const NodeHeader = ({ className, ...props }: NodeHeaderProps) => (
   <CardHeader
-    className={cn("gap-0.5 rounded-t-md border-b bg-secondary p-3!", className)}
+    className={cn("rounded-t-md border-b bg-secondary p-4", className)}
     {...props}
   />
 );
@@ -70,7 +70,7 @@ export const NodeAction = (props: NodeActionProps) => <CardAction {...props} />;
 export type NodeContentProps = ComponentProps<typeof CardContent>;
 
 export const NodeContent = ({ className, ...props }: NodeContentProps) => (
-  <CardContent className={cn("p-3", className)} {...props} />
+  <CardContent className={cn("p-4", className)} {...props} />
 );
 
 export type NodeFooterProps = ComponentProps<typeof CardFooter>;

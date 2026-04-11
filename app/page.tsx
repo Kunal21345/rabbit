@@ -190,22 +190,6 @@ const WorkflowNodeRenderer = memo(
             {data.businessRule || "Workflow Step"}
           </p>
         </NodeContent>
-
-        <NodeFooter>
-          <div className="flex flex-col gap-1 text-xs">
-            {(data.edges?.length || 0) > 0 ? (
-              data.edges?.map((edge) => (
-                <p key={edge.id}>
-                  Next:{" "}
-                  {data.nodeLabelMap?.get(edge.target) ||
-                    edge.target}
-                </p>
-              ))
-            ) : (
-              <p>Next: pending</p>
-            )}
-          </div>
-        </NodeFooter>
       </CustomNode>
     );
   }

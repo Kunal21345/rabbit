@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   WorkflowEdge,
   WorkflowNode,
@@ -28,7 +28,11 @@ export function useWorkflowPersistenceState({
   setEdges,
 }: UseWorkflowPersistenceStateArgs) {
   const [hydrated, setHydrated] = useState(false);
-  const persistedGraph = useDebounce({ nodes, edges }, 800);
+  const snapshot = useMemo(
+    () => ({ nodes, edges }),
+    [nodes, edges]
+  );
+  const persistedGraph = useDebounce(snapshot, 800);
 
   useEffect(() => {
     const saved = readWorkflowGraphSnapshot(storageKey);
