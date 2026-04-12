@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
   WorkflowEdge,
   WorkflowNode,
@@ -27,7 +27,7 @@ export function useWorkflowPersistenceState({
   setNodes,
   setEdges,
 }: UseWorkflowPersistenceStateArgs) {
-  const [hydrated, setHydrated] = useState(false);
+  const hydratedRef = useRef(false);
   const snapshot = useMemo(
     () => ({ nodes, edges }),
     [nodes, edges]
@@ -42,23 +42,23 @@ export function useWorkflowPersistenceState({
       setEdges(saved.edges);
     }
 
-    setHydrated(true);
+    hydratedRef.current = true;
   }, [setEdges, setNodes, storageKey]);
 
   useEffect(() => {
-    if (!hydrated) {
+    if (!hydratedRef.current) {
       return;
     }
 
     writeWorkflowGraphSnapshot(storageKey, persistedGraph);
-  }, [hydrated, persistedGraph, storageKey]);
+  }, [persistedGraph, storageKey]);
 
   const clearPersistedGraph = useCallback(() => {
     clearWorkflowGraphSnapshot(storageKey);
   }, [storageKey]);
 
   return {
-    hydrated,
+    hydrated: true,
     clearPersistedGraph,
   };
 }

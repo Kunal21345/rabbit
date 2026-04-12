@@ -59,11 +59,11 @@ export function useResizableChatbotPanel() {
     return Math.max(MIN_CHATBOT_WIDTH, contentWidth - MIN_CANVAS_WIDTH);
   }, [contentWidth]);
 
-  useEffect(() => {
-    setChatbotWidth((current) =>
-      clampValue(current, MIN_CHATBOT_WIDTH, maxChatbotWidth)
-    );
-  }, [maxChatbotWidth]);
+  const clampedChatbotWidth = useMemo(
+    () =>
+      clampValue(chatbotWidth, MIN_CHATBOT_WIDTH, maxChatbotWidth),
+    [chatbotWidth, maxChatbotWidth]
+  );
 
   useEffect(() => {
     if (!isResizing) {
@@ -149,20 +149,20 @@ export function useResizableChatbotPanel() {
 
       resizeStateRef.current = {
         startClientX: clientX,
-        startWidth: chatbotWidth,
+        startWidth: clampedChatbotWidth,
         containerWidth: container.getBoundingClientRect().width,
       };
       setIsResizing(true);
     },
-    [chatbotWidth, isChatbotCollapsed]
+    [clampedChatbotWidth, isChatbotCollapsed]
   );
 
   return {
     contentRef,
-    chatbotWidth,
+    chatbotWidth: clampedChatbotWidth,
     isChatbotCollapsed,
     setIsChatbotCollapsed,
     handleResizeStart,
-    effectiveChatbotWidth: isChatbotCollapsed ? 0 : chatbotWidth,
+    effectiveChatbotWidth: isChatbotCollapsed ? 0 : clampedChatbotWidth,
   };
 }

@@ -54,9 +54,6 @@ export function useWorkflowGeneration({
             nodes: nodesRef.current.map((node) => ({
               id: node.id,
               label: node.data.label,
-              description: node.data.description,
-              details: node.data.details,
-              suggestions: node.data.suggestions,
             })),
             edges: edgesRef.current.map((edge) => ({
               source: edge.source,

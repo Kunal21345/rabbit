@@ -3,6 +3,9 @@ import type {
   WorkflowNode,
 } from "@/hooks/useWorkflowGraph";
 import type {
+  GeneratedWorkflowNodeDetails,
+  WorkflowGraphContext,
+  WorkflowNodeDetailsRequest,
   WorkflowGenerationModel,
   WorkflowProvider,
 } from "@/lib/workflow-generation";
@@ -22,19 +25,7 @@ export async function generateWorkflowGraph(input: {
   model: WorkflowGenerationModel;
   provider: WorkflowProvider;
   apiKey?: string;
-  currentGraph: {
-    nodes: Array<{
-      id: string;
-      label: string;
-      description: string;
-      details: string;
-      suggestions: string;
-    }>;
-    edges: Array<{
-      source: string;
-      target: string;
-    }>;
-  };
+  currentGraph: WorkflowGraphContext;
 }): Promise<WorkflowGraphPayload> {
   const response = await fetch("/api/workflow/generate", {
     method: "POST",
@@ -61,4 +52,34 @@ export async function generateWorkflowGraph(input: {
   }
 
   return payload.graph;
+}
+
+export async function generateWorkflowNodeDetails(
+  input: WorkflowNodeDetailsRequest
+): Promise<GeneratedWorkflowNodeDetails> {
+  const response = await fetch("/api/workflow/node-details", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        error?: string;
+        details?: string;
+        nodeDetails?: GeneratedWorkflowNodeDetails;
+      }
+    | null;
+
+  if (!response.ok || !payload?.nodeDetails) {
+    throw new Error(
+      payload?.details ||
+        payload?.error ||
+        "Failed to generate workflow node details."
+    );
+  }
+
+  return payload.nodeDetails;
 }

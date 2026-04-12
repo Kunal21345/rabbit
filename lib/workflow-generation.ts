@@ -72,44 +72,71 @@ export function getDefaultWorkflowModel(
   return WORKFLOW_MODEL_OPTIONS_BY_PROVIDER[provider][0].value;
 }
 
-export type WorkflowGenerationRequest = {
+export type WorkflowGraphContext = {
+  nodes: Array<{
+    id: string;
+    label: string;
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+  }>;
+};
+
+export type WorkflowGraphRequest = {
   prompt: string;
   model: WorkflowGenerationModel;
   provider?: WorkflowProvider;
   apiKey?: string;
-  currentGraph?: {
-    nodes: Array<{
-      id: string;
-      label: string;
-      description: string;
-      details: string;
-      suggestions: string;
-    }>;
-    edges: Array<{
-      source: string;
-      target: string;
-    }>;
-  };
+  currentGraph?: WorkflowGraphContext;
 };
 
-export type GeneratedWorkflow = {
+export type GeneratedWorkflowGraph = {
   title: string;
   summary: string;
-  nodes: GeneratedWorkflowNode[];
+  nodes: GeneratedWorkflowGraphNode[];
   edges: GeneratedWorkflowEdge[];
 };
 
-export type GeneratedWorkflowNode = {
+export type GeneratedWorkflowGraphNode = {
   id: string;
   label: string;
   description: string;
-  details: string;
-  suggestions: string;
 };
 
 export type GeneratedWorkflowEdge = {
   source: string;
   target: string;
+};
+
+export type WorkflowNodeDetailsRequest = {
+  prompt: string;
+  model: WorkflowGenerationModel;
+  provider?: WorkflowProvider;
+  apiKey?: string;
+  node: {
+    id: string;
+    label: string;
+    description?: string;
+  };
+  context?: {
+    workflowTitle?: string;
+    workflowSummary?: string;
+    previousSteps?: Array<{
+      id: string;
+      label: string;
+    }>;
+    nextSteps?: Array<{
+      id: string;
+      label: string;
+    }>;
+  };
+};
+
+export type GeneratedWorkflowNodeDetails = {
+  description: string;
+  details: string;
+  suggestions: string;
 };
 
 type DagreNode = {
@@ -122,7 +149,7 @@ type DagreNode = {
 const NODE_WIDTH = 280;
 const NODE_HEIGHT = 172;
 
-export const WORKFLOW_GENERATION_SCHEMA = {
+export const WORKFLOW_GRAPH_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["title", "summary", "nodes", "edges"],
@@ -139,13 +166,7 @@ export const WORKFLOW_GENERATION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: [
-          "id",
-          "label",
-          "description",
-          "details",
-          "suggestions",
-        ],
+        required: ["id", "label", "description"],
         properties: {
           id: {
             type: "string",
@@ -154,12 +175,6 @@ export const WORKFLOW_GENERATION_SCHEMA = {
             type: "string",
           },
           description: {
-            type: "string",
-          },
-          details: {
-            type: "string",
-          },
-          suggestions: {
             type: "string",
           },
         },
@@ -180,6 +195,23 @@ export const WORKFLOW_GENERATION_SCHEMA = {
           },
         },
       },
+    },
+  },
+} as const;
+
+export const WORKFLOW_NODE_DETAILS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["description", "details", "suggestions"],
+  properties: {
+    description: {
+      type: "string",
+    },
+    details: {
+      type: "string",
+    },
+    suggestions: {
+      type: "string",
     },
   },
 } as const;
@@ -205,9 +237,9 @@ function dedupeId(baseId: string, usedIds: Set<string>) {
   return candidate;
 }
 
-export function normalizeGeneratedWorkflow(
-  workflow: GeneratedWorkflow
-): GeneratedWorkflow {
+export function normalizeGeneratedWorkflowGraph(
+  workflow: GeneratedWorkflowGraph
+): GeneratedWorkflowGraph {
   const usedIds = new Set<string>();
   const asText = (value: unknown) =>
     typeof value === "string" ? value.trim() : "";
@@ -232,8 +264,6 @@ export function normalizeGeneratedWorkflow(
       id,
       label: labelText || `Step ${index + 1}`,
       description: asText(node?.description),
-      details: asText(node?.details),
-      suggestions: asText(node?.suggestions),
     };
   });
 
@@ -275,12 +305,12 @@ export function normalizeGeneratedWorkflow(
 }
 
 export function buildWorkflowGraph(
-  workflow: GeneratedWorkflow
+  workflow: GeneratedWorkflowGraph
 ): {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
 } {
-  const normalized = normalizeGeneratedWorkflow(workflow);
+  const normalized = normalizeGeneratedWorkflowGraph(workflow);
   const graph = new dagre.graphlib.Graph();
   graph.setGraph({
     rankdir: "LR",
@@ -330,9 +360,9 @@ export function buildWorkflowGraph(
       },
       data: {
         label: node.label,
-        description: node.description,
-        details: node.details,
-        suggestions: node.suggestions,
+        description: node.description || "",
+        details: "",
+        suggestions: "",
         handles: {
           source: (outgoingCount.get(node.id) || 0) > 0,
           target: (incomingCount.get(node.id) || 0) > 0,

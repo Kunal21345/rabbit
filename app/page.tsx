@@ -3,7 +3,9 @@
 import {
   memo,
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent,
 } from "react";
@@ -33,7 +35,13 @@ import {
 import { useWorkflowGeneration } from "@/hooks/useWorkflowGeneration";
 import { useWorkflowPersistenceState } from "@/hooks/useWorkflowPersistenceState";
 import { useResizableChatbotPanel } from "@/hooks/useResizableChatbotPanel";
+import { generateWorkflowNodeDetails } from "@/lib/workflow-client";
 import {
+  getDefaultWorkflowModel,
+  isWorkflowProvider,
+  LLM_PROVIDER_API_KEYS_STORAGE_KEY,
+  LLM_PROVIDER_STORAGE_KEY,
+  type GeneratedWorkflowNodeDetails,
   type WorkflowGenerationModel,
   type WorkflowProvider,
 } from "@/lib/workflow-generation";
@@ -94,11 +102,11 @@ const initialNodes: WorkflowNode[] = [
     position: { x: 600, y: 300 },
     data: {
       label: "Sample Node 2",
-      description: "Complete the workflow",
+      description: "Review the next workflow branch",
       details: "",
       suggestions: "",
       handles: {
-        source: false,
+        source: true,
         target: true,
       },
     },
@@ -150,6 +158,70 @@ function buildEdgeMap(edges: WorkflowEdge[]) {
   return result;
 }
 
+function getStoredDetailProvider(): WorkflowProvider {
+  if (typeof window === "undefined") {
+    return "groq";
+  }
+
+  const stored = localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
+  return isWorkflowProvider(stored) ? stored : "groq";
+}
+
+function getStoredDetailApiKey(provider: WorkflowProvider) {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const raw = localStorage.getItem(LLM_PROVIDER_API_KEYS_STORAGE_KEY);
+
+    if (!raw) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<Record<WorkflowProvider, string>>;
+    const apiKey = parsed[provider]?.trim();
+
+    return apiKey || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function buildWorkflowGoalPrompt(nodes: WorkflowNode[]) {
+  const summarizedNodes = nodes
+    .map((node) => `${node.data.label}: ${node.data.description}`)
+    .join("\n");
+
+  return [
+    "Generate practical details for a workflow step within this workflow:",
+    summarizedNodes,
+  ].join("\n");
+}
+
+function buildWorkflowSummary(nodes: WorkflowNode[], edges: WorkflowEdge[]) {
+  const summarizedEdges = edges
+    .map((edge) => `${edge.source} -> ${edge.target}`)
+    .join(", ");
+
+  return [
+    `${nodes.length} steps in the workflow.`,
+    summarizedEdges ? `Connections: ${summarizedEdges}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildNodeDetailsCacheKey(input: {
+  id: string;
+  label: string;
+  description: string;
+  previousSteps: Array<{ id: string; label: string }>;
+  nextSteps: Array<{ id: string; label: string }>;
+}) {
+  return JSON.stringify(input);
+}
+
 /* ====================================================== */
 /* Node Renderer */
 /* ====================================================== */
@@ -172,16 +244,27 @@ const WorkflowNodeRenderer = memo(
       <CustomNode handles={data.handles} selected={selected}>
         <NodeHeader>
           <NodeTitle>{data.label}</NodeTitle>
-          <NodeDescription>
-            {data.description}
+          <NodeDescription className="line-clamp-2 text-xs leading-relaxed">
+            {data.description || "Step description"}
           </NodeDescription>
         </NodeHeader>
 
-        <NodeContent>
-          <p className="text-xs">
-            {data.details || "Workflow Step"}
-          </p>
+        <NodeContent className="grid gap-2">
+          <div className="grid gap-1">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Step Details
+            </p>
+            <p className="line-clamp-2 text-xs leading-relaxed text-foreground">
+              {data.details || "Step details"}
+            </p>
+          </div>
         </NodeContent>
+
+        <NodeFooter>
+          <p className="truncate text-[11px] text-muted-foreground">
+            Open step details
+          </p>
+        </NodeFooter>
       </CustomNode>
     );
   }
@@ -219,6 +302,19 @@ export default function WorkflowBuilder() {
     useState<string | null>(null);
   const [sheetOpen, setSheetOpen] =
     useState(false);
+  const [pendingNodeDetailKeys, setPendingNodeDetailKeys] =
+    useState<string[]>([]);
+  const [nodeDetailErrors, setNodeDetailErrors] =
+    useState<Record<string, string>>({});
+  const lastWorkflowPromptRef = useRef("");
+  const lastWorkflowSettingsRef = useRef<{
+    model: WorkflowGenerationModel;
+    provider: WorkflowProvider;
+    apiKey?: string;
+  } | null>(null);
+  const requestedNodeDetailsKeysRef = useRef(new Set<string>());
+  const failedNodeDetailsKeysRef = useRef(new Set<string>());
+  const unmountedRef = useRef(false);
   const { clearPersistedGraph } = useWorkflowPersistenceState({
     storageKey: STORAGE_KEY,
     nodes,
@@ -246,6 +342,10 @@ export default function WorkflowBuilder() {
     onWorkflowReplaced: () => {
       setSelectedNodeId(null);
       setSheetOpen(false);
+      setPendingNodeDetailKeys([]);
+      setNodeDetailErrors({});
+      requestedNodeDetailsKeysRef.current.clear();
+      failedNodeDetailsKeysRef.current.clear();
     },
   });
 
@@ -266,6 +366,11 @@ export default function WorkflowBuilder() {
       ])
     );
   }, [nodes]);
+
+  const nodesById = useMemo(
+    () => new Map(nodes.map((node) => [node.id, node])),
+    [nodes]
+  );
 
   const canvasNodes = useMemo(() => {
     return nodes.map((node) => ({
@@ -316,6 +421,72 @@ export default function WorkflowBuilder() {
       })),
     [nodes]
   );
+
+  const nodeDetailsPlan = useMemo(() => {
+    return nodes.map((node) => {
+      const previousSteps = edges
+        .filter((edge) => edge.target === node.id)
+        .map((edge) => {
+          const sourceNode = nodesById.get(edge.source);
+
+          return sourceNode
+            ? {
+                id: sourceNode.id,
+                label: sourceNode.data.label,
+              }
+            : null;
+        })
+        .filter(
+          (step): step is { id: string; label: string } => Boolean(step)
+        );
+
+      const nextSteps = edges
+        .filter((edge) => edge.source === node.id)
+        .map((edge) => {
+          const targetNode = nodesById.get(edge.target);
+
+          return targetNode
+            ? {
+                id: targetNode.id,
+                label: targetNode.data.label,
+              }
+            : null;
+        })
+        .filter(
+          (step): step is { id: string; label: string } => Boolean(step)
+        );
+
+      return {
+        node,
+        previousSteps,
+        nextSteps,
+        cacheKey: buildNodeDetailsCacheKey({
+          id: node.id,
+          label: node.data.label,
+          description: node.data.description,
+          previousSteps,
+          nextSteps,
+        }),
+        needsDetails:
+          Boolean(node.data.description.trim()) &&
+          (
+            !node.data.details.trim() ||
+            !node.data.suggestions.trim()
+          ),
+      };
+    });
+  }, [edges, nodes, nodesById]);
+
+  const selectedNodeDetailsKey = useMemo(() => {
+    if (!selectedNodeId) {
+      return null;
+    }
+
+    return (
+      nodeDetailsPlan.find((entry) => entry.node.id === selectedNodeId)
+        ?.cacheKey || null
+    );
+  }, [nodeDetailsPlan, selectedNodeId]);
 
   const handleNodeClick = useCallback(
     (_event: MouseEvent<HTMLDivElement>, node: WorkflowNode) => {
@@ -370,10 +541,167 @@ export default function WorkflowBuilder() {
       provider: WorkflowProvider,
       apiKey?: string
     ): Promise<WorkflowSubmitResult> => {
+      lastWorkflowPromptRef.current = prompt;
+      lastWorkflowSettingsRef.current = {
+        model,
+        provider,
+        apiKey,
+      };
       return submitPrompt(prompt, model, provider, apiKey);
     },
     [submitPrompt]
   );
+
+  useEffect(() => {
+    unmountedRef.current = false;
+
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const pendingEntries = nodeDetailsPlan.filter(
+      (entry) =>
+        entry.needsDetails &&
+        !requestedNodeDetailsKeysRef.current.has(entry.cacheKey) &&
+        !failedNodeDetailsKeysRef.current.has(entry.cacheKey)
+    );
+
+    if (pendingEntries.length === 0) {
+      return;
+    }
+
+    pendingEntries.forEach((entry) => {
+      requestedNodeDetailsKeysRef.current.add(entry.cacheKey);
+    });
+
+    setPendingNodeDetailKeys((current) => [
+      ...new Set([
+        ...current,
+        ...pendingEntries.map((entry) => entry.cacheKey),
+      ]),
+    ]);
+
+    const workflowSettings =
+      lastWorkflowSettingsRef.current || {
+        model: getDefaultWorkflowModel(getStoredDetailProvider()),
+        provider: getStoredDetailProvider(),
+        apiKey: getStoredDetailApiKey(getStoredDetailProvider()),
+      };
+    const workflowPrompt =
+      lastWorkflowPromptRef.current || buildWorkflowGoalPrompt(nodes);
+
+    Promise.allSettled(
+      pendingEntries.map(async (entry) => {
+        const nodeDetails = await generateWorkflowNodeDetails({
+          prompt: workflowPrompt,
+          model: workflowSettings.model,
+          provider: workflowSettings.provider,
+          apiKey: workflowSettings.apiKey,
+          node: {
+            id: entry.node.id,
+            label: entry.node.data.label,
+            description: entry.node.data.description,
+          },
+          context: {
+            workflowTitle: "Current workflow",
+            workflowSummary: buildWorkflowSummary(nodes, edges),
+            previousSteps: entry.previousSteps,
+            nextSteps: entry.nextSteps,
+          },
+        });
+
+        return {
+          cacheKey: entry.cacheKey,
+          nodeId: entry.node.id,
+          nodeDetails,
+        };
+      })
+    ).then((results) => {
+      if (unmountedRef.current) {
+        return;
+      }
+
+      const successfulDetails = new Map<
+        string,
+        GeneratedWorkflowNodeDetails
+      >();
+      const nextErrors: Record<string, string> = {};
+
+      results.forEach((result, index) => {
+        const entry = pendingEntries[index];
+
+        if (result.status === "fulfilled") {
+          failedNodeDetailsKeysRef.current.delete(entry.cacheKey);
+          successfulDetails.set(
+            result.value.nodeId,
+            result.value.nodeDetails
+          );
+          delete nextErrors[entry.cacheKey];
+          return;
+        }
+
+        requestedNodeDetailsKeysRef.current.delete(entry.cacheKey);
+        failedNodeDetailsKeysRef.current.add(entry.cacheKey);
+        nextErrors[entry.cacheKey] =
+          result.reason instanceof Error
+            ? result.reason.message
+            : "Failed to generate workflow node details.";
+      });
+
+      if (successfulDetails.size > 0) {
+        setNodes((currentNodes) =>
+          currentNodes.map((node) => {
+            const nodeDetails = successfulDetails.get(node.id);
+
+            if (!nodeDetails) {
+              return node;
+            }
+
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                description:
+                  nodeDetails.description.trim() ||
+                  node.data.description,
+                details: nodeDetails.details.trim(),
+                suggestions: nodeDetails.suggestions.trim(),
+              },
+            };
+          })
+        );
+      }
+
+      setNodeDetailErrors((current) => {
+        const merged = { ...current };
+
+        pendingEntries.forEach((entry) => {
+          if (!(entry.cacheKey in nextErrors)) {
+            delete merged[entry.cacheKey];
+          }
+        });
+
+        return {
+          ...merged,
+          ...nextErrors,
+        };
+      });
+
+      setPendingNodeDetailKeys((current) =>
+        current.filter(
+          (key) =>
+            !pendingEntries.some((entry) => entry.cacheKey === key)
+        )
+      );
+    });
+  }, [
+    edges,
+    nodes,
+    nodeDetailsPlan,
+    setNodes,
+  ]);
 
   /* ====================================================== */
   /* Render */
@@ -385,6 +713,12 @@ export default function WorkflowBuilder() {
     setSelectedNodeId(null);
     setSheetOpen(false);
     clearGenerationError();
+    setPendingNodeDetailKeys([]);
+    setNodeDetailErrors({});
+    lastWorkflowPromptRef.current = "";
+    lastWorkflowSettingsRef.current = null;
+    requestedNodeDetailsKeysRef.current.clear();
+    failedNodeDetailsKeysRef.current.clear();
     clearPersistedGraph();
   }, [clearGenerationError, clearPersistedGraph, setEdges, setNodes]);
 
@@ -465,10 +799,21 @@ export default function WorkflowBuilder() {
       </div>
 
       <NodeSheet
+        key={selectedNode?.id || "empty-node-sheet"}
         node={selectedNode}
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         onSave={handleSave}
+        detailsLoading={
+          selectedNodeDetailsKey
+            ? pendingNodeDetailKeys.includes(selectedNodeDetailsKey)
+            : false
+        }
+        detailsError={
+          selectedNodeDetailsKey
+            ? nodeDetailErrors[selectedNodeDetailsKey] || null
+            : null
+        }
         nodes={nodeOptions}
       />
     </div>

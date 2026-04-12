@@ -5,7 +5,6 @@ import {
   useEffect,
   useCallback,
   useMemo,
-  useRef,
 } from "react";
 
 import { Label } from "@/components/ui/label";
@@ -39,6 +38,8 @@ type NodeSheetProps = {
   open: boolean;
   onClose: () => void;
   onSave: (node: NodeData) => void;
+  detailsLoading?: boolean;
+  detailsError?: string | null;
   nodes: {
     id: string;
     label: string;
@@ -56,25 +57,6 @@ type FieldSchema = {
   type: "textarea" | "input";
 };
 
-function areNodeDraftsEqual(
-  left: NodeData | null,
-  right: NodeData | null
-) {
-  if (!left || !right) return left === right;
-
-  return (
-    left.id === right.id &&
-    left.label === right.label &&
-    left.description === right.description &&
-    left.details === right.details &&
-    left.suggestions === right.suggestions &&
-    left.nextNodeIds.length === right.nextNodeIds.length &&
-    left.nextNodeIds.every(
-      (nodeId, index) => nodeId === right.nextNodeIds[index]
-    )
-  );
-}
-
 /* -------------------------------------------------- */
 /* Schema */
 /* -------------------------------------------------- */
@@ -82,23 +64,23 @@ function areNodeDraftsEqual(
 const MAIN_FIELDS: FieldSchema[] = [
   {
     key: "description",
-    label: "Step Description",
+    label: "Step description",
     type: "textarea",
   },
   {
     key: "details",
-    label: "Detail of That Step",
+    label: "Step details",
     type: "textarea",
   },
   {
     key: "suggestions",
-    label: "Suggestions to Complete the Step",
+    label: "Suggestions for completion",
     type: "textarea",
   },
 ];
 
 const FIELD_CLASS =
-  "bg-background shadow-none";
+  "bg-background shadow-none font-normal text-muted-foreground";
 
 /* -------------------------------------------------- */
 /* Component */
@@ -109,45 +91,43 @@ export function NodeSheet({
   open,
   onClose,
   onSave,
+  detailsLoading = false,
+  detailsError = null,
   nodes,
 }: NodeSheetProps) {
-  const [draft, setDraft] = useState<NodeData | null>(null);
-  const lastSavedDraftRef = useRef<NodeData | null>(null);
+  const [overrides, setOverrides] = useState<
+    Partial<Record<EditableNodeField, string>>
+  >({});
 
-  /* -------------------------------------------------- */
-  /* Sync */
-  /* -------------------------------------------------- */
-
-  useEffect(() => {
+  const draft = useMemo(() => {
     if (!node) {
-      setDraft(null);
-      lastSavedDraftRef.current = null;
-      return;
+      return null;
     }
 
-    lastSavedDraftRef.current = node;
-    setDraft((current) =>
-      areNodeDraftsEqual(current, node) ? current : node
-    );
-  }, [node]);
+    return {
+      ...node,
+      ...overrides,
+    };
+  }, [node, overrides]);
 
   /* -------------------------------------------------- */
   /* Autosave */
   /* -------------------------------------------------- */
 
+  const hasOverrides = Object.keys(overrides).length > 0;
+
   useEffect(() => {
-    if (!draft) return;
-    if (areNodeDraftsEqual(lastSavedDraftRef.current, draft)) {
+    if (!draft || !hasOverrides) {
       return;
     }
 
     const timer = setTimeout(() => {
       onSave(draft);
-      lastSavedDraftRef.current = draft;
+      setOverrides({});
     }, 500);
 
-    return () => clearTimeout(timer);
-  }, [draft, onSave]);
+    return () => window.clearTimeout(timer);
+  }, [draft, hasOverrides, onSave]);
 
   /* -------------------------------------------------- */
   /* Update */
@@ -155,18 +135,31 @@ export function NodeSheet({
 
   const updateField = useCallback(
     (key: EditableNodeField, value: string) => {
-      setDraft((prev) =>
-        prev
-          ? prev[key] === value
-            ? prev
-            : {
-                ...prev,
-                [key]: value,
-              }
-          : prev
-      );
+      setOverrides((current) => {
+        if (!draft) {
+          return current;
+        }
+
+        const nextValue = value === node?.[key] ? undefined : value;
+
+        if (current[key] === nextValue) {
+          return current;
+        }
+
+        const nextOverrides = {
+          ...current,
+        };
+
+        if (nextValue === undefined) {
+          delete nextOverrides[key];
+        } else {
+          nextOverrides[key] = nextValue;
+        }
+
+        return nextOverrides;
+      });
     },
-    []
+    [draft, node]
   );
 
   /* -------------------------------------------------- */
@@ -195,7 +188,7 @@ export function NodeSheet({
     const id = field.key;
 
     return (
-      <div className="grid gap-3" key={field.key}>
+      <div className="grid gap-4" key={field.key}>
         <Label htmlFor={id}>{field.label}</Label>
 
         {field.type === "textarea" ? (
@@ -235,12 +228,12 @@ export function NodeSheet({
     <Sheet open={open} onOpenChange={onClose}>
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="font-bold uppercase">
+          <SheetTitle className="font-semibold text-xl">
             {draft.label}
           </SheetTitle>
 
-          <SheetDescription>
-            Configure node logic
+          <SheetDescription className="text-sm text-muted-foreground">
+            Step details and suggestions
           </SheetDescription>
         </SheetHeader>
         <Separator />
@@ -248,6 +241,18 @@ export function NodeSheet({
         {/* Main */}
 
         <div className="grid gap-6 p-6">
+          {detailsLoading ? (
+            <p className="text-sm text-muted-foreground">
+              Generating step details...
+            </p>
+          ) : null}
+
+          {detailsError ? (
+            <p className="text-sm text-destructive">
+              {detailsError}
+            </p>
+          ) : null}
+
           {MAIN_FIELDS.map(renderField)}
         </div>
         <Separator />

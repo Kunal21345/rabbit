@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
 import type {
-  GeneratedWorkflowGraph,
-  WorkflowGraphRequest,
+  GeneratedWorkflowNodeDetails,
+  WorkflowNodeDetailsRequest,
   WorkflowProvider,
 } from "@/lib/workflow-generation";
 import {
   getDefaultWorkflowModel,
   isWorkflowGenerationModel,
   isWorkflowProvider,
-  WORKFLOW_GRAPH_SCHEMA,
-  buildWorkflowGraph,
+  WORKFLOW_NODE_DETAILS_SCHEMA,
 } from "@/lib/workflow-generation";
 
 export const runtime = "nodejs";
@@ -20,8 +19,6 @@ const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const OLLAMA_API_URL =
   process.env.OLLAMA_API_URL || "http://localhost:11434/api/chat";
 const PROVIDER_TIMEOUT_MS = 30000;
-const GROQ_RATE_LIMIT_MAX_RETRIES = 1;
-const GROQ_RATE_LIMIT_MAX_WAIT_MS = 8000;
 
 const MISSING_API_KEY_MESSAGES: Record<
   Exclude<WorkflowProvider, "ollama">,
@@ -59,9 +56,26 @@ function sanitizeText(value: unknown, maxLength = 4000) {
   return value.trim().slice(0, maxLength);
 }
 
+function normalizeNodeList(
+  value: unknown
+): Array<{ id: string; label: string }> {
+  return Array.isArray(value)
+    ? value
+        .filter(
+          (node): node is Record<string, unknown> =>
+            typeof node === "object" && node !== null
+        )
+        .map((node) => ({
+          id: sanitizeText(node.id, 120),
+          label: sanitizeText(node.label, 200),
+        }))
+        .filter((node) => node.id && node.label)
+    : [];
+}
+
 function normalizeRequest(
   payload: unknown
-): WorkflowGraphRequest | null {
+): WorkflowNodeDetailsRequest | null {
   if (typeof payload !== "object" || payload === null) {
     return null;
   }
@@ -72,33 +86,39 @@ function normalizeRequest(
     ? record.model
     : getDefaultWorkflowModel(provider);
 
-  const currentGraph =
-    typeof record.currentGraph === "object" &&
-    record.currentGraph !== null
+  const node =
+    typeof record.node === "object" && record.node !== null
       ? {
-          nodes: Array.isArray((record.currentGraph as Record<string, unknown>).nodes)
-            ? ((record.currentGraph as Record<string, unknown>).nodes as unknown[])
-                .filter(
-                  (node): node is Record<string, unknown> =>
-                    typeof node === "object" && node !== null
-                )
-                .map((node) => ({
-                  id: sanitizeText(node.id, 120),
-                  label: sanitizeText(node.label, 200),
-                }))
-            : [],
-          edges: Array.isArray((record.currentGraph as Record<string, unknown>).edges)
-            ? ((record.currentGraph as Record<string, unknown>).edges as unknown[])
-                .filter(
-                  (edge): edge is Record<string, unknown> =>
-                    typeof edge === "object" && edge !== null
-                )
-                .map((edge) => ({
-                  source: sanitizeText(edge.source, 120),
-                  target: sanitizeText(edge.target, 120),
-                }))
-                .filter((edge) => edge.source && edge.target)
-            : [],
+          id: sanitizeText((record.node as Record<string, unknown>).id, 120),
+          label: sanitizeText((record.node as Record<string, unknown>).label, 200),
+          description: sanitizeText(
+            (record.node as Record<string, unknown>).description,
+            300
+          ),
+        }
+      : null;
+
+  if (!node?.id || !node.label) {
+    return null;
+  }
+
+  const context =
+    typeof record.context === "object" && record.context !== null
+      ? {
+          workflowTitle: sanitizeText(
+            (record.context as Record<string, unknown>).workflowTitle,
+            200
+          ),
+          workflowSummary: sanitizeText(
+            (record.context as Record<string, unknown>).workflowSummary,
+            600
+          ),
+          previousSteps: normalizeNodeList(
+            (record.context as Record<string, unknown>).previousSteps
+          ),
+          nextSteps: normalizeNodeList(
+            (record.context as Record<string, unknown>).nextSteps
+          ),
         }
       : undefined;
 
@@ -107,7 +127,8 @@ function normalizeRequest(
     model,
     provider,
     apiKey: sanitizeText(record.apiKey, 500),
-    currentGraph,
+    node,
+    context,
   };
 }
 
@@ -157,34 +178,23 @@ function validateApiKeyForProvider(
   return null;
 }
 
-function buildPrompt(input: WorkflowGraphRequest) {
+function buildPrompt(input: WorkflowNodeDetailsRequest) {
   return [
-    "Generate a complete workflow graph from the user's use case.",
-    "Return the final workflow, not a patch.",
-    "The graph may add, remove, or rename nodes as needed.",
-    "Every node must have stable slug-style ids.",
-    "Use direct unlabeled edges between nodes.",
-    "First, identify the core happy path and render that base path as a linear sequence of steps from start to finish.",
-    "The happy path must remain the primary backbone of the workflow.",
-    "A node may connect to multiple target nodes only when that core step is a true decision, approval, validation, status check, timeout, missing-input check, or business-rule split.",
-    "For ordinary action steps, continue the workflow as a single next step on the linear happy path.",
-    "Only after defining the happy-path backbone should you add secondary branches for meaningful alternate outcomes, exceptions, or failure cases.",
-    "If a core step is a decision-making step, keep the normal or approved outcome on the main path and render the other outcomes as secondary nodes branching from that same step.",
-    "Do not turn every step into a parallel action node.",
-    "Do not create exception branches for minor edge cases that can be handled within the same step.",
-    "Do not collapse distinct decision outcomes into one generic node when separate branches are genuinely needed.",
-    "Prefer explicit start and end nodes when appropriate.",
-    "Return graph structure only.",
-    "Each node must include id and label.",
-    "Each node must include description as one short sentence.",
-    "Keep node labels specific enough to distinguish normal, exception, and decision branches.",
-    "Do not include details or suggestions.",
+    "Write the sheet content for exactly one workflow step.",
+    "Return only description, details, and suggestions.",
+    "Do not rename the step.",
+    "Do not invent new nodes, branching, or business rules outside the provided context.",
+    "description must be one short sentence.",
+    "details should be concise and practical.",
+    "suggestions should be short, actionable guidance.",
     "",
-    `User use case:\n${input.prompt}`,
+    `Workflow goal:\n${input.prompt}`,
     "",
-    input.currentGraph
-      ? `Current graph context:\n${JSON.stringify(input.currentGraph, null, 2)}`
-      : "Current graph context:\nNone",
+    `Current step:\n${JSON.stringify(input.node, null, 2)}`,
+    "",
+    input.context
+      ? `Local step context:\n${JSON.stringify(input.context, null, 2)}`
+      : "Local step context:\nNone",
   ].join("\n");
 }
 
@@ -256,11 +266,11 @@ function extractOllamaContent(response: unknown) {
   throw new Error("Ollama response did not include message content");
 }
 
-function parseGeneratedWorkflow(
+function parseGeneratedNodeDetails(
   outputText: string
-): GeneratedWorkflowGraph {
+): GeneratedWorkflowNodeDetails {
   try {
-    return JSON.parse(outputText) as GeneratedWorkflowGraph;
+    return JSON.parse(outputText) as GeneratedWorkflowNodeDetails;
   } catch {
     const firstBrace = outputText.indexOf("{");
     const lastBrace = outputText.lastIndexOf("}");
@@ -270,46 +280,12 @@ function parseGeneratedWorkflow(
     }
 
     const jsonSlice = outputText.slice(firstBrace, lastBrace + 1);
-    return JSON.parse(jsonSlice) as GeneratedWorkflowGraph;
+    return JSON.parse(jsonSlice) as GeneratedWorkflowNodeDetails;
   }
-}
-
-function parseGroqRetryDelayMs(errorText: string) {
-  const retryAfterMatch = errorText.match(/try again in\s+([\d.]+)s/i);
-
-  if (!retryAfterMatch) {
-    return null;
-  }
-
-  const seconds = Number.parseFloat(retryAfterMatch[1]);
-
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    return null;
-  }
-
-  return Math.min(
-    Math.ceil(seconds * 1000) + 250,
-    GROQ_RATE_LIMIT_MAX_WAIT_MS
-  );
-}
-
-function isGroqRateLimitError(
-  errorCode: string | null,
-  errorText: string
-) {
-  return (
-    errorCode === "rate_limit_exceeded" ||
-    /"code":"rate_limit_exceeded"/.test(errorText) ||
-    /rate limit reached/i.test(errorText)
-  );
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function requestGroq(
-  payload: WorkflowGraphRequest,
+  payload: WorkflowNodeDetailsRequest,
   apiKey: string
 ) {
   async function requestWithFormat(
@@ -320,9 +296,9 @@ async function requestGroq(
         ? {
             type: "json_schema" as const,
             json_schema: {
-              name: "workflow_graph",
+              name: "workflow_node_details",
               strict: true,
-              schema: WORKFLOW_GRAPH_SCHEMA,
+              schema: WORKFLOW_NODE_DETAILS_SCHEMA,
             },
           }
         : mode === "json_object"
@@ -344,8 +320,8 @@ async function requestGroq(
             role: "system",
             content:
               mode === "none"
-                ? "You are a workflow planner. Return ONLY valid JSON object and no markdown."
-                : "You are a workflow planner. Return only valid JSON matching the supplied schema.",
+                ? "You are a workflow detail writer. Return ONLY valid JSON object and no markdown."
+                : "You are a workflow detail writer. Return only valid JSON matching the supplied schema.",
           },
           {
             role: "user",
@@ -380,7 +356,6 @@ async function requestGroq(
       return {
         ok: false as const,
         errorCode,
-        status: response.status,
         errorText,
       };
     }
@@ -392,36 +367,9 @@ async function requestGroq(
     };
   }
 
-  async function requestWithRateLimitRetry(
-    mode: "strict" | "json_object" | "none"
-  ) {
-    let attempt = 0;
-
-    while (true) {
-      const result = await requestWithFormat(mode);
-
-      if (result.ok) {
-        return result;
-      }
-
-      if (
-        attempt >= GROQ_RATE_LIMIT_MAX_RETRIES ||
-        !isGroqRateLimitError(result.errorCode, result.errorText)
-      ) {
-        return result;
-      }
-
-      const delayMs =
-        parseGroqRetryDelayMs(result.errorText) || 1500;
-
-      attempt += 1;
-      await wait(delayMs);
-    }
-  }
-
   const shouldUseStrict =
     supportsStrictStructuredOutputs(payload.model);
-  const firstAttempt = await requestWithRateLimitRetry(
+  const firstAttempt = await requestWithFormat(
     shouldUseStrict ? "strict" : "json_object"
   );
 
@@ -429,17 +377,15 @@ async function requestGroq(
     return firstAttempt.content;
   }
 
-  if (
-    firstAttempt.errorCode === "json_validate_failed"
-  ) {
-    const fallbackAttempt = await requestWithRateLimitRetry("json_object");
+  if (firstAttempt.errorCode === "json_validate_failed") {
+    const fallbackAttempt = await requestWithFormat("json_object");
 
     if (fallbackAttempt.ok) {
       return fallbackAttempt.content;
     }
 
     if (fallbackAttempt.errorCode === "json_validate_failed") {
-      const noFormatAttempt = await requestWithRateLimitRetry("none");
+      const noFormatAttempt = await requestWithFormat("none");
 
       if (noFormatAttempt.ok) {
         return noFormatAttempt.content;
@@ -461,7 +407,7 @@ async function requestGroq(
 }
 
 async function requestOpenAI(
-  payload: WorkflowGraphRequest,
+  payload: WorkflowNodeDetailsRequest,
   apiKey: string
 ) {
   const response = await fetchWithTimeout(OPENAI_API_URL, {
@@ -476,7 +422,7 @@ async function requestOpenAI(
         {
           role: "system",
           content:
-            "You are a workflow planner. Return only valid JSON matching the supplied schema.",
+            "You are a workflow detail writer. Return only valid JSON matching the supplied schema.",
         },
         {
           role: "user",
@@ -488,9 +434,9 @@ async function requestOpenAI(
           ? {
               type: "json_schema",
               json_schema: {
-                name: "workflow_graph",
+                name: "workflow_node_details",
                 strict: true,
-                schema: WORKFLOW_GRAPH_SCHEMA,
+                schema: WORKFLOW_NODE_DETAILS_SCHEMA,
               },
             }
           : {
@@ -511,7 +457,7 @@ async function requestOpenAI(
 }
 
 async function requestClaude(
-  payload: WorkflowGraphRequest,
+  payload: WorkflowNodeDetailsRequest,
   apiKey: string
 ) {
   const response = await fetchWithTimeout(CLAUDE_API_URL, {
@@ -523,9 +469,9 @@ async function requestClaude(
     },
     body: JSON.stringify({
       model: payload.model,
-      max_tokens: 4096,
+      max_tokens: 2048,
       system:
-        "You are a workflow planner. Return only valid JSON with keys: title, summary, nodes, edges.",
+        "You are a workflow detail writer. Return only valid JSON with keys: description, details, suggestions.",
       messages: [
         {
           role: "user",
@@ -545,7 +491,7 @@ async function requestClaude(
   return extractClaudeContent(raw);
 }
 
-async function requestOllama(payload: WorkflowGraphRequest) {
+async function requestOllama(payload: WorkflowNodeDetailsRequest) {
   const response = await fetchWithTimeout(OLLAMA_API_URL, {
     method: "POST",
     headers: {
@@ -557,7 +503,7 @@ async function requestOllama(payload: WorkflowGraphRequest) {
         {
           role: "system",
           content:
-            "You are a workflow planner. Return only valid JSON with keys: title, summary, nodes, edges.",
+            "You are a workflow detail writer. Return only valid JSON with keys: description, details, suggestions.",
         },
         {
           role: "user",
@@ -600,7 +546,7 @@ export async function POST(request: Request) {
   if (!payload) {
     return NextResponse.json(
       {
-        error: "Request payload must be a JSON object.",
+        error: "Request payload must be a JSON object with a valid node.",
       },
       { status: 400 }
     );
@@ -653,17 +599,15 @@ export async function POST(request: Request) {
             ? await requestClaude(payload, apiKey)
             : await requestOllama(payload);
 
-    const generatedWorkflow = parseGeneratedWorkflow(outputText);
-    const graph = buildWorkflowGraph(generatedWorkflow);
+    const nodeDetails = parseGeneratedNodeDetails(outputText);
 
     return NextResponse.json({
-      workflow: generatedWorkflow,
-      graph,
+      nodeDetails,
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: "Failed to generate workflow graph.",
+        error: "Failed to generate workflow node details.",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 }
@@ -692,26 +636,4 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timeout);
   }
-}
-
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const provider = normalizeProvider(url.searchParams.get("provider"));
-
-  if (provider === "ollama") {
-    return NextResponse.json({ configured: true, provider });
-  }
-
-  const configured = Boolean(resolveApiKey(provider));
-
-  return NextResponse.json(
-    configured
-      ? { configured: true, provider }
-      : {
-          configured: false,
-          provider,
-          error: MISSING_API_KEY_MESSAGES[provider],
-        },
-    { status: configured ? 200 : 503 }
-  );
 }
