@@ -47,12 +47,21 @@ export const WORKFLOW_MODEL_OPTIONS_BY_PROVIDER: Record<
     },
   ],
   groq: [
-    { label: "GPT OSS 20B", value: "openai/gpt-oss-20b" },
     { label: "GPT OSS 120B", value: "openai/gpt-oss-120b" },
+    {
+      label: "GPT OSS 20B (Experimental)",
+      value: "openai/gpt-oss-20b",
+    },
     { label: "Llama 3.3 70B", value: "llama-3.3-70b-versatile" },
   ],
   ollama: [{ label: "Llama 3.2 3B", value: "llama3.2:3b" }],
 };
+
+export function isExperimentalWorkflowModel(
+  model: WorkflowGenerationModel
+) {
+  return model === "openai/gpt-oss-20b";
+}
 
 export function isWorkflowProvider(value: unknown): value is WorkflowProvider {
   return WORKFLOW_PROVIDER_OPTIONS.some((provider) => provider.value === value);

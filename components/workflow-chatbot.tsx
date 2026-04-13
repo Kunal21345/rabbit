@@ -42,6 +42,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import {
   getDefaultWorkflowModel,
+  isExperimentalWorkflowModel,
   isWorkflowProvider,
   LLM_PROVIDER_API_KEYS_STORAGE_KEY,
   LLM_PROVIDER_STORAGE_KEY,
@@ -183,6 +184,8 @@ export function WorkflowChatbot({
   }, [draft, loading]);
 
   const modelOptions = WORKFLOW_MODEL_OPTIONS_BY_PROVIDER[provider];
+  const selectedModelIsExperimental =
+    isExperimentalWorkflowModel(model);
 
   useEffect(() => {
     const viewport =
@@ -410,6 +413,13 @@ export function WorkflowChatbot({
           </InputGroup>
 
           {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+          {selectedModelIsExperimental ? (
+            <p className="mt-2 text-xs text-amber-600">
+              GPT OSS 20B is experimental here and can return messy structured
+              output. For cleaner workflow graphs, use GPT OSS 120B, Llama 3.3
+              70B, or GPT-4.1 Mini.
+            </p>
+          ) : null}
         </form>
       </section>
 

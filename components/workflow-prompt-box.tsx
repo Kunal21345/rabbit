@@ -32,12 +32,12 @@ const MODELS: Array<{
   value: WorkflowGenerationModel;
 }> = [
   {
-    label: "GPT OSS 20B",
-    value: "openai/gpt-oss-20b",
-  },
-  {
     label: "GPT OSS 120B",
     value: "openai/gpt-oss-120b",
+  },
+  {
+    label: "GPT OSS 20B (Experimental)",
+    value: "openai/gpt-oss-20b",
   },
   {
     label: "Llama 3.3 70B",

@@ -302,6 +302,8 @@ export default function WorkflowBuilder() {
     useState<string | null>(null);
   const [sheetOpen, setSheetOpen] =
     useState(false);
+  const [autoGenerateNodeDetails, setAutoGenerateNodeDetails] =
+    useState(false);
   const [pendingNodeDetailKeys, setPendingNodeDetailKeys] =
     useState<string[]>([]);
   const [nodeDetailErrors, setNodeDetailErrors] =
@@ -547,7 +549,18 @@ export default function WorkflowBuilder() {
         provider,
         apiKey,
       };
-      return submitPrompt(prompt, model, provider, apiKey);
+      const result = await submitPrompt(
+        prompt,
+        model,
+        provider,
+        apiKey
+      );
+
+      if (result.ok) {
+        setAutoGenerateNodeDetails(true);
+      }
+
+      return result;
     },
     [submitPrompt]
   );
@@ -561,6 +574,10 @@ export default function WorkflowBuilder() {
   }, []);
 
   useEffect(() => {
+    if (!autoGenerateNodeDetails) {
+      return;
+    }
+
     const pendingEntries = nodeDetailsPlan.filter(
       (entry) =>
         entry.needsDetails &&
@@ -697,6 +714,7 @@ export default function WorkflowBuilder() {
       );
     });
   }, [
+    autoGenerateNodeDetails,
     edges,
     nodes,
     nodeDetailsPlan,
@@ -712,6 +730,7 @@ export default function WorkflowBuilder() {
     setEdges(initialEdges);
     setSelectedNodeId(null);
     setSheetOpen(false);
+    setAutoGenerateNodeDetails(false);
     clearGenerationError();
     setPendingNodeDetailKeys([]);
     setNodeDetailErrors({});
