@@ -1,0 +1,13 @@
+{
+    "claudeCode.allowDangerouslySkipPermissions": true,
+    "claudeCode.environmentVariables": [
+        {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "https://ai.gcp.mphasis.ai"
+    },
+    {
+      "name": "ANTHROPIC_AUTH_TOKEN",
+      "value": "sk--TXh0QWHpmHRSUkqsP3h2Q"
+    }
+    ]
+}

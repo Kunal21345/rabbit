@@ -39,7 +39,6 @@ import { generateWorkflowNodeDetails } from "@/lib/workflow-client";
 import {
   getDefaultWorkflowModel,
   isWorkflowProvider,
-  LLM_PROVIDER_API_KEYS_STORAGE_KEY,
   LLM_PROVIDER_STORAGE_KEY,
   type GeneratedWorkflowNodeDetails,
   type WorkflowGenerationModel,
@@ -82,7 +81,7 @@ const initialNodes: WorkflowNode[] = [
     },
   },
   {
-    id: "Sample Node",
+    id: "sample-node-1",
     type: "workflow",
     position: { x: 600, y: -300 },
     data: {
@@ -97,7 +96,7 @@ const initialNodes: WorkflowNode[] = [
     },
   },
   {
-    id: "Sample Node 2",
+    id: "sample-node-2",
     type: "workflow",
     position: { x: 600, y: 300 },
     data: {
@@ -115,14 +114,14 @@ const initialNodes: WorkflowNode[] = [
 
 const initialEdges: WorkflowEdge[] = [
   {
-    id: "start-sample-node",
+    id: "start-sample-node-1",
     source: "start",
-    target: "Sample Node",
+    target: "sample-node-1",
   },
   {
     id: "start-sample-node-2",
     source: "start",
-    target: "Sample Node 2",
+    target: "sample-node-2",
   },
 ];
 
@@ -150,10 +149,29 @@ const STORAGE_KEY = `workflow-graph-${hashSeedGraph(
 function buildEdgeMap(edges: WorkflowEdge[]) {
   const result = new Map<string, WorkflowEdge[]>();
 
-  edges.forEach((edge) => {
-    const existing = result.get(edge.source) || [];
-    result.set(edge.source, [...existing, edge]);
-  });
+  for (const edge of edges) {
+    const existing = result.get(edge.source);
+    if (existing) {
+      existing.push(edge);
+    } else {
+      result.set(edge.source, [edge]);
+    }
+  }
+
+  return result;
+}
+
+function buildIncomingEdgeMap(edges: WorkflowEdge[]) {
+  const result = new Map<string, WorkflowEdge[]>();
+
+  for (const edge of edges) {
+    const existing = result.get(edge.target);
+    if (existing) {
+      existing.push(edge);
+    } else {
+      result.set(edge.target, [edge]);
+    }
+  }
 
   return result;
 }
@@ -165,27 +183,6 @@ function getStoredDetailProvider(): WorkflowProvider {
 
   const stored = localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
   return isWorkflowProvider(stored) ? stored : "groq";
-}
-
-function getStoredDetailApiKey(provider: WorkflowProvider) {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-
-  try {
-    const raw = localStorage.getItem(LLM_PROVIDER_API_KEYS_STORAGE_KEY);
-
-    if (!raw) {
-      return undefined;
-    }
-
-    const parsed = JSON.parse(raw) as Partial<Record<WorkflowProvider, string>>;
-    const apiKey = parsed[provider]?.trim();
-
-    return apiKey || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function buildWorkflowGoalPrompt(nodes: WorkflowNode[]) {
@@ -219,7 +216,17 @@ function buildNodeDetailsCacheKey(input: {
   previousSteps: Array<{ id: string; label: string }>;
   nextSteps: Array<{ id: string; label: string }>;
 }) {
-  return JSON.stringify(input);
+  return JSON.stringify({
+    id: input.id,
+    label: input.label,
+    description: input.description,
+    previousSteps: [...input.previousSteps].sort((a, b) =>
+      a.id.localeCompare(b.id)
+    ),
+    nextSteps: [...input.nextSteps].sort((a, b) =>
+      a.id.localeCompare(b.id)
+    ),
+  });
 }
 
 /* ====================================================== */
@@ -309,10 +316,10 @@ export default function WorkflowBuilder() {
   const [nodeDetailErrors, setNodeDetailErrors] =
     useState<Record<string, string>>({});
   const lastWorkflowPromptRef = useRef("");
+  const lastWorkflowTitleRef = useRef("Current workflow");
   const lastWorkflowSettingsRef = useRef<{
     model: WorkflowGenerationModel;
     provider: WorkflowProvider;
-    apiKey?: string;
   } | null>(null);
   const requestedNodeDetailsKeysRef = useRef(new Set<string>());
   const failedNodeDetailsKeysRef = useRef(new Set<string>());
@@ -341,9 +348,11 @@ export default function WorkflowBuilder() {
     edges,
     setNodes,
     setEdges,
-    onWorkflowReplaced: () => {
+    onWorkflowReplaced: (title) => {
+      lastWorkflowTitleRef.current = title || "Current workflow";
       setSelectedNodeId(null);
       setSheetOpen(false);
+      setAutoGenerateNodeDetails(false);
       setPendingNodeDetailKeys([]);
       setNodeDetailErrors({});
       requestedNodeDetailsKeysRef.current.clear();
@@ -357,6 +366,11 @@ export default function WorkflowBuilder() {
 
   const edgeMap = useMemo(
     () => buildEdgeMap(edges),
+    [edges]
+  );
+
+  const incomingEdgeMap = useMemo(
+    () => buildIncomingEdgeMap(edges),
     [edges]
   );
 
@@ -385,10 +399,6 @@ export default function WorkflowBuilder() {
     }));
   }, [nodes, edgeMap, nodeLabelMap]);
 
-  const canvasEdges = useMemo(
-    () => edges,
-    [edges]
-  );
 
   /* ====================================================== */
   /* Selected Node */
@@ -397,9 +407,7 @@ export default function WorkflowBuilder() {
   const selectedNode = useMemo(() => {
     if (!selectedNodeId) return null;
 
-    const node = nodes.find(
-      (n) => n.id === selectedNodeId
-    );
+    const node = nodesById.get(selectedNodeId);
 
     if (!node) return null;
 
@@ -540,20 +548,17 @@ export default function WorkflowBuilder() {
     async (
       prompt: string,
       model: WorkflowGenerationModel,
-      provider: WorkflowProvider,
-      apiKey?: string
+      provider: WorkflowProvider
     ): Promise<WorkflowSubmitResult> => {
       lastWorkflowPromptRef.current = prompt;
       lastWorkflowSettingsRef.current = {
         model,
         provider,
-        apiKey,
       };
       const result = await submitPrompt(
         prompt,
         model,
-        provider,
-        apiKey
+        provider
       );
 
       if (result.ok) {
@@ -604,7 +609,6 @@ export default function WorkflowBuilder() {
       lastWorkflowSettingsRef.current || {
         model: getDefaultWorkflowModel(getStoredDetailProvider()),
         provider: getStoredDetailProvider(),
-        apiKey: getStoredDetailApiKey(getStoredDetailProvider()),
       };
     const workflowPrompt =
       lastWorkflowPromptRef.current || buildWorkflowGoalPrompt(nodes);
@@ -615,7 +619,6 @@ export default function WorkflowBuilder() {
           prompt: workflowPrompt,
           model: workflowSettings.model,
           provider: workflowSettings.provider,
-          apiKey: workflowSettings.apiKey,
           node: {
             id: entry.node.id,
             label: entry.node.data.label,
@@ -766,7 +769,7 @@ export default function WorkflowBuilder() {
             <div className="relative h-full w-full">
               <Canvas
                 nodes={canvasNodes}
-                edges={canvasEdges}
+                edges={edges}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 onNodePositionChange={moveNode}

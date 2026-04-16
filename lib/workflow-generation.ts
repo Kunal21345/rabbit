@@ -13,6 +13,7 @@ export type WorkflowGenerationModel =
   | "llama3.2:3b";
 
 export const LLM_PROVIDER_STORAGE_KEY = "workflow-llm-provider";
+export const LLM_MODEL_STORAGE_KEY = "workflow-llm-model";
 export const LLM_PROVIDER_API_KEYS_STORAGE_KEY =
   "workflow-llm-provider-api-keys";
 

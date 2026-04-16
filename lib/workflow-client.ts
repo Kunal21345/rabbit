@@ -18,13 +18,13 @@ export type WorkflowSubmitResult = {
 export type WorkflowGraphPayload = {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  title: string;
 };
 
 export async function generateWorkflowGraph(input: {
   prompt: string;
   model: WorkflowGenerationModel;
   provider: WorkflowProvider;
-  apiKey?: string;
   currentGraph: WorkflowGraphContext;
 }): Promise<WorkflowGraphPayload> {
   const response = await fetch("/api/workflow/generate", {
@@ -39,7 +39,8 @@ export async function generateWorkflowGraph(input: {
     | {
         error?: string;
         details?: string;
-        graph?: WorkflowGraphPayload;
+        graph?: { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
+        workflow?: { title?: string };
       }
     | null;
 
@@ -51,7 +52,11 @@ export async function generateWorkflowGraph(input: {
     );
   }
 
-  return payload.graph;
+  return {
+    nodes: payload.graph.nodes,
+    edges: payload.graph.edges,
+    title: payload.workflow?.title ?? "",
+  };
 }
 
 export async function generateWorkflowNodeDetails(

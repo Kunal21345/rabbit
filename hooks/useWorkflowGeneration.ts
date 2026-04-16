@@ -16,7 +16,7 @@ type UseWorkflowGenerationArgs = {
   edges: WorkflowEdge[];
   setNodes: React.Dispatch<React.SetStateAction<WorkflowNode[]>>;
   setEdges: React.Dispatch<React.SetStateAction<WorkflowEdge[]>>;
-  onWorkflowReplaced?: () => void;
+  onWorkflowReplaced?: (title: string) => void;
 };
 
 export function useWorkflowGeneration({
@@ -38,8 +38,7 @@ export function useWorkflowGeneration({
     async (
       prompt: string,
       model: WorkflowGenerationModel,
-      provider: WorkflowProvider,
-      apiKey?: string
+      provider: WorkflowProvider
     ): Promise<WorkflowSubmitResult> => {
       setGenerationError(null);
       setIsGeneratingWorkflow(true);
@@ -49,7 +48,6 @@ export function useWorkflowGeneration({
           prompt,
           model,
           provider,
-          apiKey,
           currentGraph: {
             nodes: nodesRef.current.map((node) => ({
               id: node.id,
@@ -64,7 +62,7 @@ export function useWorkflowGeneration({
 
         setNodes(graph.nodes);
         setEdges(graph.edges);
-        onWorkflowReplaced?.();
+        onWorkflowReplaced?.(graph.title);
 
         return {
           ok: true,

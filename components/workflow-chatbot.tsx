@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -11,7 +10,6 @@ import {
 } from "react";
 import { ArrowUpIcon, Settings2Icon, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   InputGroup,
@@ -43,8 +41,9 @@ import {
 import {
   getDefaultWorkflowModel,
   isExperimentalWorkflowModel,
+  isWorkflowGenerationModel,
   isWorkflowProvider,
-  LLM_PROVIDER_API_KEYS_STORAGE_KEY,
+  LLM_MODEL_STORAGE_KEY,
   LLM_PROVIDER_STORAGE_KEY,
   WORKFLOW_MODEL_OPTIONS_BY_PROVIDER,
   WORKFLOW_PROVIDER_OPTIONS,
@@ -71,62 +70,25 @@ type WorkflowChatbotProps = {
   onSubmit: (
     prompt: string,
     model: WorkflowGenerationModel,
-    provider: WorkflowProvider,
-    apiKey?: string
+    provider: WorkflowProvider
   ) => Promise<SubmitResult>;
 };
 
-type ProviderApiKeyMap = Record<WorkflowProvider, string>;
-
-function emptyProviderApiKeys(): ProviderApiKeyMap {
-  return {
-    openai: "",
-    claude: "",
-    groq: "",
-    ollama: "",
-  };
-}
-
-function getStoredProvider(): WorkflowProvider {
+function getStoredModel(provider: WorkflowProvider): WorkflowGenerationModel {
   if (typeof window === "undefined") {
-    return "groq";
+    return getDefaultWorkflowModel(provider);
   }
 
-  const stored = localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
+  const stored = localStorage.getItem(LLM_MODEL_STORAGE_KEY);
+  const providerModels = WORKFLOW_MODEL_OPTIONS_BY_PROVIDER[provider];
 
-  if (isWorkflowProvider(stored)) {
+  if (
+    isWorkflowGenerationModel(stored) &&
+    providerModels.some((m) => m.value === stored)
+  ) {
     return stored;
   }
 
-  return "groq";
-}
-
-function getStoredProviderApiKeys(): ProviderApiKeyMap {
-  if (typeof window === "undefined") {
-    return emptyProviderApiKeys();
-  }
-
-  try {
-    const raw = localStorage.getItem(LLM_PROVIDER_API_KEYS_STORAGE_KEY);
-
-    if (!raw) {
-      return emptyProviderApiKeys();
-    }
-
-    const parsed = JSON.parse(raw) as Partial<ProviderApiKeyMap>;
-
-    return {
-      openai: parsed.openai?.trim() || "",
-      claude: parsed.claude?.trim() || "",
-      groq: parsed.groq?.trim() || "",
-      ollama: parsed.ollama?.trim() || "",
-    };
-  } catch {
-    return emptyProviderApiKeys();
-  }
-}
-
-function getDefaultModel(provider: WorkflowProvider): WorkflowGenerationModel {
   return getDefaultWorkflowModel(provider);
 }
 
@@ -142,7 +104,7 @@ function getModelForProvider(
     return currentModel;
   }
 
-  return getDefaultModel(provider);
+  return getDefaultWorkflowModel(provider);
 }
 
 function createMessage(role: ChatRole, content: string): ChatMessage {
@@ -164,28 +126,49 @@ export function WorkflowChatbot({
   onSubmit,
 }: WorkflowChatbotProps) {
   const [draft, setDraft] = useState("");
-  const [provider, setProvider] =
-    useState<WorkflowProvider>(getStoredProvider);
+  const [provider, setProvider] = useState<WorkflowProvider>("groq");
   const [model, setModel] = useState<WorkflowGenerationModel>(() =>
-    getDefaultModel(getStoredProvider())
+    getDefaultWorkflowModel("groq")
   );
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [providerApiKeys, setProviderApiKeys] =
-    useState<ProviderApiKeyMap>(getStoredProviderApiKeys);
-  const [settingsProvider, setSettingsProvider] =
-    useState<WorkflowProvider>(provider);
-  const [settingsProviderApiKeys, setSettingsProviderApiKeys] =
-    useState<ProviderApiKeyMap>(providerApiKeys);
+  const [settingsProvider, setSettingsProvider] = useState<WorkflowProvider>("groq");
+  const [settingsModel, setSettingsModel] = useState<WorkflowGenerationModel>(
+    getDefaultWorkflowModel("groq")
+  );
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
 
-  const canSubmit = useMemo(() => {
-    return Boolean(draft.trim()) && !loading;
-  }, [draft, loading]);
+  const canSubmit = Boolean(draft.trim()) && !loading;
 
   const modelOptions = WORKFLOW_MODEL_OPTIONS_BY_PROVIDER[provider];
+  const settingsModelOptions =
+    WORKFLOW_MODEL_OPTIONS_BY_PROVIDER[settingsProvider];
   const selectedModelIsExperimental =
     isExperimentalWorkflowModel(model);
+  const activeProviderLabel =
+    WORKFLOW_PROVIDER_OPTIONS.find((candidate) => candidate.value === provider)
+      ?.label || "Provider";
+  const activeModelLabel =
+    modelOptions.find((candidate) => candidate.value === model)?.label || model;
+
+  useEffect(() => {
+    const syncStoredSettings = () => {
+      const storedProviderRaw = localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
+      const nextProvider = isWorkflowProvider(storedProviderRaw)
+        ? storedProviderRaw
+        : "groq";
+      const nextModel = getStoredModel(nextProvider);
+
+      setProvider(nextProvider);
+      setModel(nextModel);
+      setSettingsProvider(nextProvider);
+      setSettingsModel(nextModel);
+    };
+
+    const timeoutId = window.setTimeout(syncStoredSettings, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, []);
 
   useEffect(() => {
     const viewport =
@@ -209,18 +192,24 @@ export function WorkflowChatbot({
     setDraft("");
     setMessages((current) => [...current, createMessage("user", prompt)]);
 
-    const result = await onSubmit(
-      prompt,
-      model,
-      provider,
-      providerApiKeys[provider] || undefined
-    );
+    try {
+      const result = await onSubmit(
+        prompt,
+        model,
+        provider
+      );
 
-    setMessages((current) => [
-      ...current,
-      createMessage("assistant", result.message),
-    ]);
-  }, [draft, loading, model, onSubmit, provider, providerApiKeys]);
+      setMessages((current) => [
+        ...current,
+        createMessage("assistant", result.message),
+      ]);
+    } catch {
+      setMessages((current) => [
+        ...current,
+        createMessage("assistant", "Something went wrong. Please try again."),
+      ]);
+    }
+  }, [draft, loading, model, onSubmit, provider]);
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -248,31 +237,28 @@ export function WorkflowChatbot({
 
   const handleOpenSettings = useCallback(() => {
     setSettingsProvider(provider);
-    setSettingsProviderApiKeys(providerApiKeys);
+    setSettingsModel(model);
     setSettingsOpen(true);
-  }, [provider, providerApiKeys]);
+  }, [model, provider]);
 
   const handleProviderChange = useCallback((nextProvider: WorkflowProvider) => {
     setProvider(nextProvider);
-    setModel((currentModel) => getModelForProvider(nextProvider, currentModel));
+    setModel((currentModel) => {
+      const nextModel = getModelForProvider(nextProvider, currentModel);
+      localStorage.setItem(LLM_MODEL_STORAGE_KEY, nextModel);
+      return nextModel;
+    });
     localStorage.setItem(LLM_PROVIDER_STORAGE_KEY, nextProvider);
   }, []);
 
   const handleSaveSettings = useCallback(() => {
-    const nextProviderApiKeys = {
-      ...settingsProviderApiKeys,
-      [settingsProvider]: settingsProviderApiKeys[settingsProvider].trim(),
-    };
+    const nextModel = getModelForProvider(settingsProvider, settingsModel);
 
-    setProviderApiKeys(nextProviderApiKeys);
-    localStorage.setItem(
-      LLM_PROVIDER_API_KEYS_STORAGE_KEY,
-      JSON.stringify(nextProviderApiKeys)
-    );
-
+    setModel(nextModel);
+    localStorage.setItem(LLM_MODEL_STORAGE_KEY, nextModel);
     handleProviderChange(settingsProvider);
     setSettingsOpen(false);
-  }, [handleProviderChange, settingsProvider, settingsProviderApiKeys]);
+  }, [handleProviderChange, settingsModel, settingsProvider]);
 
   return (
     <div className="h-full w-full">
@@ -301,8 +287,6 @@ export function WorkflowChatbot({
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Settings</TooltipContent>
               </Tooltip>
-            </TooltipProvider>
-            <TooltipProvider delayDuration={100}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -365,32 +349,14 @@ export function WorkflowChatbot({
               disabled={loading}
               onChange={(event) => setDraft(event.currentTarget.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask Codex to create or refine your workflow..."
+              placeholder="Describe your workflow and I'll build or update the graph..."
               value={draft}
             />
 
             <InputGroupAddon align="block-end" className="justify-between gap-1">
-              <PromptInputSelect
-                value={model}
-                onValueChange={(value) =>
-                  setModel(value as WorkflowGenerationModel)
-                }
-              >
-                <PromptInputSelectTrigger
-                  className="h-8 w-[190px] rounded-full bg-muted text-xs text-foreground hover:bg-accent"
-                  disabled={loading}
-                >
-                  <PromptInputSelectValue />
-                </PromptInputSelectTrigger>
-
-                <PromptInputSelectContent>
-                  {modelOptions.map((option) => (
-                    <PromptInputSelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </PromptInputSelectItem>
-                  ))}
-                </PromptInputSelectContent>
-              </PromptInputSelect>
+              <div className="px-2 text-[11px] text-muted-foreground">
+                {activeProviderLabel} · {activeModelLabel}
+              </div>
 
               <TooltipProvider delayDuration={100}>
                 <Tooltip>
@@ -428,7 +394,7 @@ export function WorkflowChatbot({
           <SheetHeader>
             <SheetTitle>LLM Settings</SheetTitle>
             <SheetDescription>
-              Choose provider and configure the API key for that provider.
+              Choose the provider and model. API keys are read from server-side environment variables in `.env.local`.
             </SheetDescription>
           </SheetHeader>
 
@@ -437,9 +403,13 @@ export function WorkflowChatbot({
               <Label htmlFor="llm-provider">API provider</Label>
               <PromptInputSelect
                 value={settingsProvider}
-                onValueChange={(value) =>
-                  setSettingsProvider(value as WorkflowProvider)
-                }
+                onValueChange={(value) => {
+                  const nextProvider = value as WorkflowProvider;
+                  setSettingsProvider(nextProvider);
+                  setSettingsModel((currentModel) =>
+                    getModelForProvider(nextProvider, currentModel)
+                  );
+                }}
               >
                 <PromptInputSelectTrigger id="llm-provider" className="h-9 w-full rounded-md">
                   <PromptInputSelectValue />
@@ -455,37 +425,36 @@ export function WorkflowChatbot({
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="llm-api-key">
-                {WORKFLOW_PROVIDER_OPTIONS.find((candidate) => candidate.value === settingsProvider)
-                  ?.label || "Provider"}{" "}
-                API key
-              </Label>
-              <Input
-                id="llm-api-key"
-                type="password"
-                value={settingsProviderApiKeys[settingsProvider]}
-                onChange={(event) => {
-                  const nextValue = event.currentTarget.value;
-
-                  setSettingsProviderApiKeys((current) => ({
-                    ...current,
-                    [settingsProvider]: nextValue,
-                  }));
-                }}
-                placeholder={
-                  settingsProvider === "openai"
-                    ? "sk-..."
-                    : settingsProvider === "claude"
-                      ? "sk-ant-..."
-                      : settingsProvider === "groq"
-                        ? "gsk_..."
-                        : "Optional for local Ollama"
+              <Label htmlFor="llm-model">Model</Label>
+              <PromptInputSelect
+                value={settingsModel}
+                onValueChange={(value) =>
+                  setSettingsModel(value as WorkflowGenerationModel)
                 }
-              />
-              <p className="text-xs text-muted-foreground">
-                Stored locally in this browser and sent only to your workflow generation API route.
-              </p>
+              >
+                <PromptInputSelectTrigger id="llm-model" className="h-9 w-full rounded-md">
+                  <PromptInputSelectValue />
+                </PromptInputSelectTrigger>
+                <PromptInputSelectContent>
+                  {settingsModelOptions.map((option) => (
+                    <PromptInputSelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </PromptInputSelectItem>
+                  ))}
+                </PromptInputSelectContent>
+              </PromptInputSelect>
             </div>
+
+            <p className="text-xs text-muted-foreground">
+              Configure the matching server env var for your provider:
+              {settingsProvider === "openai"
+                ? " OPENAI_API_KEY"
+                : settingsProvider === "claude"
+                  ? " ANTHROPIC_API_KEY"
+                  : settingsProvider === "groq"
+                    ? " GROQ_API_KEY"
+                    : " OLLAMA_API_URL (optional for local Ollama)"}
+            </p>
 
             <div className="flex items-center justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setSettingsOpen(false)}>

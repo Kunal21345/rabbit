@@ -1,3 +1,7 @@
+import * as fs from "node:fs";
+import * as https from "node:https";
+import * as path from "node:path";
+import * as tls from "node:tls";
 import {
   getDefaultWorkflowModel,
   isExperimentalWorkflowModel,
@@ -5,9 +9,175 @@ import {
   type WorkflowProvider,
 } from "@/lib/workflow-generation";
 
+// Load corporate / proxy CA certificate chain if present so that node:https
+// can verify TLS connections to internal gateways (e.g. ai.gcp.mphasis.ai).
+function loadCorporateCa(): Buffer | undefined {
+  try {
+    const configuredPath = process.env.WORKFLOW_CA_CERT_PATH?.trim();
+    const certPath = configuredPath
+      ? path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.join(process.cwd(), configuredPath)
+      : path.join(process.cwd(), "certs", "mphasis-chain.pem");
+
+    return fs.existsSync(certPath) ? fs.readFileSync(certPath) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const CORPORATE_CA = loadCorporateCa();
+const TRUSTED_CA_BUNDLE = CORPORATE_CA
+  ? [...tls.rootCertificates, CORPORATE_CA.toString("utf8")]
+  : undefined;
+const CONFIGURED_CA_CERT_PATH = process.env.WORKFLOW_CA_CERT_PATH?.trim() || "";
+const ALLOW_INSECURE_PROVIDER_TLS =
+  process.env.WORKFLOW_ALLOW_INSECURE_TLS === "true";
+const ALLOW_INSECURE_CLAUDE_TLS =
+  process.env.WORKFLOW_ALLOW_INSECURE_CLAUDE_TLS === "true";
+const FORCE_HTTPS_HOSTS = new Set(
+  (process.env.WORKFLOW_FORCE_HTTPS_HOSTS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+);
+const INSECURE_TLS_HOSTS = new Set(
+  (process.env.WORKFLOW_INSECURE_TLS_HOSTS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+);
+const INSECURE_TLS_PROVIDERS = new Set(
+  (process.env.WORKFLOW_INSECURE_TLS_PROVIDERS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+console.info("[workflow-runtime] TLS config", {
+  caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+  insecureProviderTls: ALLOW_INSECURE_PROVIDER_TLS,
+  insecureClaudeTls: ALLOW_INSECURE_CLAUDE_TLS,
+  forceHttpsHosts: [...FORCE_HTTPS_HOSTS],
+  insecureTlsHosts: [...INSECURE_TLS_HOSTS],
+  insecureTlsProviders: [...INSECURE_TLS_PROVIDERS],
+});
+
+function getHostname(url: string): string {
+  return new URL(url).hostname.toLowerCase();
+}
+
+function shouldAllowInsecureTls(
+  url: string,
+  provider?: WorkflowProvider
+): boolean {
+  const hostname = getHostname(url);
+
+  return (
+    ALLOW_INSECURE_PROVIDER_TLS ||
+    (provider === "claude" && ALLOW_INSECURE_CLAUDE_TLS)
+    || INSECURE_TLS_HOSTS.has(hostname)
+    || (provider ? INSECURE_TLS_PROVIDERS.has(provider) : false)
+  );
+}
+
+function shouldUseCorporateTls(url: string): boolean {
+  if (!CORPORATE_CA || !url.startsWith("https://")) {
+    return false;
+  }
+
+  const hostname = getHostname(url);
+
+  return (
+    FORCE_HTTPS_HOSTS.has(hostname) ||
+    hostname === "localhost" ||
+    hostname.endsWith(".mphasis.ai") ||
+    hostname.endsWith(".gcp.mphasis.ai")
+  );
+}
+
+function isTlsCertificateError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? `${error.message} ${
+          (error as Error & { cause?: unknown }).cause instanceof Error
+            ? (error as Error & { cause?: Error }).cause?.message || ""
+            : ""
+        }`
+      : "";
+
+  return /self-signed certificate|certificate chain|unable to verify/i.test(
+    message
+  );
+}
+
+// When a corporate CA is present, make a TLS-verified request using node:https
+// instead of the global fetch (which Next.js may patch and which ignores
+// NODE_EXTRA_CA_CERTS in some configurations).
+async function httpsRequestToResponse(
+  url: string,
+  init: RequestInit,
+  signal: AbortSignal,
+  provider?: WorkflowProvider
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("AbortError"));
+      return;
+    }
+
+    signal.addEventListener("abort", () => reject(new Error("AbortError")), {
+      once: true,
+    });
+
+    const parsed = new URL(url);
+
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: (init.method ?? "GET").toUpperCase(),
+        headers: init.headers as Record<string, string>,
+        ca: TRUSTED_CA_BUNDLE,
+        rejectUnauthorized: !shouldAllowInsecureTls(url, provider),
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const body = Buffer.concat(chunks);
+          const headers: Record<string, string> = {};
+
+          for (const [key, value] of Object.entries(res.headers)) {
+            if (typeof value === "string") headers[key] = value;
+            else if (Array.isArray(value)) headers[key] = value.join(", ");
+          }
+
+          resolve(new Response(body, { status: res.statusCode ?? 200, headers }));
+        });
+        res.on("error", reject);
+      }
+    );
+
+    req.on("error", reject);
+
+    if (init.body && typeof init.body === "string") {
+      req.write(init.body);
+    }
+
+    req.end();
+  });
+}
+
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+const _anthropicBaseUrl = process.env.ANTHROPIC_BASE_URL?.replace(/\/$/, "");
+const CLAUDE_API_URL =
+  process.env.CLAUDE_API_URL ||
+  (_anthropicBaseUrl
+    ? `${_anthropicBaseUrl}/v1/messages`
+    : "https://api.anthropic.com/v1/messages");
 const OLLAMA_API_URL =
   process.env.OLLAMA_API_URL || "http://localhost:11434/api/chat";
 const PROVIDER_TIMEOUT_MS = 30000;
@@ -34,26 +204,36 @@ export function supportsStrictStructuredOutputs(model: string) {
   );
 }
 
+// Strip characters that are invalid in HTTP header values.
+// Valid range: HTAB (0x09), SP (0x20), and visible ASCII (0x21-0x7E).
+// This removes control chars, DEL, and any non-ASCII Unicode (e.g. em dashes
+// that autocorrect may silently substitute for hyphens in API keys).
+function sanitizeHeaderValue(value: string): string {
+  return value.trim().replace(/[^\x09\x20-\x7E]/g, "");
+}
+
 export function resolveApiKey(
   provider: WorkflowProvider,
   inlineApiKey?: string
 ): string {
-  const requestApiKey = inlineApiKey?.trim();
+  const requestApiKey = sanitizeHeaderValue(inlineApiKey ?? "");
 
   if (requestApiKey) {
     return requestApiKey;
   }
 
   if (provider === "groq") {
-    return process.env.GROQ_API_KEY || "";
+    return sanitizeHeaderValue(process.env.GROQ_API_KEY || "");
   }
 
   if (provider === "openai") {
-    return process.env.OPENAI_API_KEY || "";
+    return sanitizeHeaderValue(process.env.OPENAI_API_KEY || "");
   }
 
   if (provider === "claude") {
-    return process.env.ANTHROPIC_API_KEY || "";
+    return sanitizeHeaderValue(
+      process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || ""
+    );
   }
 
   return "";
@@ -73,8 +253,12 @@ export function validateApiKeyForProvider(
     return "Selected provider is OpenAI, but the key format does not look like an OpenAI key (expected prefix: sk-).";
   }
 
-  if (provider === "claude" && !apiKey.startsWith("sk-ant-")) {
-    return "Selected provider is Claude, but the key format does not look like a Claude key (expected prefix: sk-ant-).";
+  if (
+    provider === "claude" &&
+    !apiKey.startsWith("sk-ant-") &&
+    !apiKey.startsWith("sk-")
+  ) {
+    return 'Selected provider is Claude, but the key format does not look like an Anthropic key (expected prefix like "sk-").';
   }
 
   return null;
@@ -255,19 +439,79 @@ function wait(ms: number) {
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
-  init: RequestInit
+  init: RequestInit,
+  provider?: WorkflowProvider
 ) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
 
   try {
-    return await fetch(input, {
-      ...init,
-      signal: controller.signal,
-    });
+    const url = String(input);
+
+    // Only force node:https for internal/corporate gateways that need the
+    // additional trust bundle. Public provider APIs should use normal fetch.
+    if (shouldUseCorporateTls(url)) {
+      console.info("[workflow-runtime] using corporate TLS path", {
+        provider,
+        host: getHostname(url),
+        caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+        insecureTls: shouldAllowInsecureTls(url, provider),
+      });
+      return await httpsRequestToResponse(
+        url,
+        init,
+        controller.signal,
+        provider
+      );
+    }
+
+    try {
+      console.info("[workflow-runtime] using fetch path", {
+        provider,
+        host: getHostname(url),
+        caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+        insecureTls: shouldAllowInsecureTls(url, provider),
+      });
+      return await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (
+        url.startsWith("https://") &&
+        isTlsCertificateError(error)
+      ) {
+        console.warn("[workflow-runtime] fetch TLS failed, retrying with https", {
+          provider,
+          host: getHostname(url),
+          caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+          insecureTls: shouldAllowInsecureTls(url, provider),
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown TLS error",
+        });
+        return await httpsRequestToResponse(
+          url,
+          init,
+          controller.signal,
+          provider
+        );
+      }
+
+      throw error;
+    }
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error("Provider request timed out.");
+    }
+
+    // Surface the underlying cause (e.g. ENOTFOUND, ECONNREFUSED) from Node.js fetch errors
+    if (error instanceof Error) {
+      const cause = (error as Error & { cause?: unknown }).cause;
+      if (cause instanceof Error) {
+        throw new Error(`${error.message}: ${cause.message}`);
+      }
     }
 
     throw error;
@@ -334,7 +578,7 @@ async function requestGroqStructured(
         ...(responseFormat ? { response_format: responseFormat } : {}),
         temperature: 0.2,
       }),
-    });
+    }, input.provider);
 
     if (!response.ok) {
       const errorPayload = await response.json().catch(() => null);
@@ -463,7 +707,7 @@ async function requestOpenAIStructured(
       },
       temperature: 0.2,
     }),
-  });
+  }, input.provider);
 
   if (!response.ok) {
     throw new Error(`OpenAI request failed: ${await response.text()}`);
@@ -494,7 +738,7 @@ async function requestClaudeStructured(
       ],
       temperature: 0.2,
     }),
-  });
+  }, input.provider);
 
   if (!response.ok) {
     throw new Error(`Claude request failed: ${await response.text()}`);
@@ -529,7 +773,7 @@ async function requestOllamaStructured(
         temperature: 0.2,
       },
     }),
-  });
+  }, input.provider);
 
   if (!response.ok) {
     throw new Error(`Ollama request failed: ${await response.text()}`);

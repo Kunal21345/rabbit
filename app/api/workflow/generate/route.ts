@@ -145,6 +145,30 @@ function validateGeneratedWorkflowGraph(
   }
 }
 
+function toUserFacingProviderError(
+  provider: WorkflowProvider,
+  details: string
+) {
+  const normalized = details.toLowerCase();
+
+  if (
+    provider === "claude" &&
+    (normalized.includes("invalid x-api-key") ||
+      normalized.includes("authentication_error"))
+  ) {
+    return {
+      status: 401,
+      error:
+        "Invalid Anthropic API key. Update ANTHROPIC_API_KEY in .env.local and restart the dev server.",
+    };
+  }
+
+  return {
+    status: 500,
+    error: "Failed to generate workflow graph.",
+  };
+}
+
 export async function POST(request: Request) {
   const requestId = createRequestId();
   let rawPayload: unknown;
@@ -254,6 +278,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const details =
       error instanceof Error ? error.message : "Unknown error";
+    const providerError = toUserFacingProviderError(provider, details);
 
     console.error("[workflow/generate]", {
       requestId,
@@ -265,12 +290,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: "Failed to generate workflow graph.",
+        error: providerError.error,
         details,
         requestId,
       },
       {
-        status: 500,
+        status: providerError.status,
         headers: {
           "x-request-id": requestId,
         },
