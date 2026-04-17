@@ -104,6 +104,8 @@ export type WorkflowGraphRequest = {
 export type GeneratedWorkflowGraph = {
   title: string;
   summary: string;
+  responseMessage: string;
+  reasoningSummary: string;
   nodes: GeneratedWorkflowGraphNode[];
   edges: GeneratedWorkflowEdge[];
 };
@@ -162,12 +164,25 @@ const NODE_HEIGHT = 172;
 export const WORKFLOW_GRAPH_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["title", "summary", "nodes", "edges"],
+  required: [
+    "title",
+    "summary",
+    "responseMessage",
+    "reasoningSummary",
+    "nodes",
+    "edges",
+  ],
   properties: {
     title: {
       type: "string",
     },
     summary: {
+      type: "string",
+    },
+    responseMessage: {
+      type: "string",
+    },
+    reasoningSummary: {
       type: "string",
     },
     nodes: {
@@ -309,6 +324,8 @@ export function normalizeGeneratedWorkflowGraph(
   return {
     title: asText(workflow?.title),
     summary: asText(workflow?.summary),
+    responseMessage: asText(workflow?.responseMessage),
+    reasoningSummary: asText(workflow?.reasoningSummary),
     nodes,
     edges,
   };

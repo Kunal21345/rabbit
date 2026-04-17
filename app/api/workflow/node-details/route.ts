@@ -273,7 +273,7 @@ export async function POST(request: Request) {
       fallbackSystemPrompt:
         "You are a workflow detail writer. Return ONLY one valid JSON object and no markdown.",
       userPrompt: buildPrompt(payload),
-      maxTokens: 2048,
+      maxTokens: 512,
       parse: parseGeneratedNodeDetails,
     });
 

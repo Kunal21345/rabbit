@@ -9,16 +9,17 @@ import {
   type WorkflowProvider,
 } from "@/lib/workflow-generation";
 
-// Load corporate / proxy CA certificate chain if present so that node:https
-// can verify TLS connections to internal gateways (e.g. ai.gcp.mphasis.ai).
+// Load optional CA certificate chain if present so node:https can verify TLS
+// connections behind enterprise proxies or private gateways.
 function loadCorporateCa(): Buffer | undefined {
   try {
     const configuredPath = process.env.WORKFLOW_CA_CERT_PATH?.trim();
-    const certPath = configuredPath
-      ? path.isAbsolute(configuredPath)
-        ? configuredPath
-        : path.join(process.cwd(), configuredPath)
-      : path.join(process.cwd(), "certs", "mphasis-chain.pem");
+    if (!configuredPath) {
+      return undefined;
+    }
+    const certPath = path.isAbsolute(configuredPath)
+      ? configuredPath
+      : path.join(process.cwd(), configuredPath);
 
     return fs.existsSync(certPath) ? fs.readFileSync(certPath) : undefined;
   } catch {
@@ -55,7 +56,7 @@ const INSECURE_TLS_PROVIDERS = new Set(
 );
 
 console.info("[workflow-runtime] TLS config", {
-  caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+  caPath: CONFIGURED_CA_CERT_PATH || null,
   insecureProviderTls: ALLOW_INSECURE_PROVIDER_TLS,
   insecureClaudeTls: ALLOW_INSECURE_CLAUDE_TLS,
   forceHttpsHosts: [...FORCE_HTTPS_HOSTS],
@@ -90,9 +91,7 @@ function shouldUseCorporateTls(url: string): boolean {
 
   return (
     FORCE_HTTPS_HOSTS.has(hostname) ||
-    hostname === "localhost" ||
-    hostname.endsWith(".mphasis.ai") ||
-    hostname.endsWith(".gcp.mphasis.ai")
+    hostname === "localhost"
   );
 }
 
@@ -181,7 +180,7 @@ const CLAUDE_API_URL =
 const OLLAMA_API_URL =
   process.env.OLLAMA_API_URL || "http://localhost:11434/api/chat";
 const PROVIDER_TIMEOUT_MS = 30000;
-const GROQ_RATE_LIMIT_MAX_RETRIES = 1;
+const GROQ_RATE_LIMIT_MAX_RETRIES = 2;
 const GROQ_RATE_LIMIT_MAX_WAIT_MS = 8000;
 
 export const MISSING_API_KEY_MESSAGES: Record<
@@ -314,7 +313,49 @@ export function parseJsonObjectFromText<T>(
   }
 }
 
-function extractOpenAIStyleContent(response: unknown) {
+type ExtractedModelResponse = {
+  content: string;
+  reasoning?: string;
+  warnings?: string[];
+};
+
+function collectTextParts(
+  value: unknown,
+  selector: (part: Record<string, unknown>) => string | null
+) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(
+      (part): part is Record<string, unknown> =>
+        typeof part === "object" && part !== null
+    )
+    .map(selector)
+    .filter((part): part is string => Boolean(part?.trim()))
+    .map((part) => part.trim());
+}
+
+function extractWarnings(response: unknown) {
+  if (
+    response &&
+    typeof response === "object" &&
+    "warnings" in response &&
+    Array.isArray(response.warnings)
+  ) {
+    return response.warnings
+      .filter((warning): warning is string => typeof warning === "string")
+      .map((warning) => warning.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function extractOpenAIStyleContent(
+  response: unknown
+): ExtractedModelResponse {
   if (
     response &&
     typeof response === "object" &&
@@ -328,30 +369,65 @@ function extractOpenAIStyleContent(response: unknown) {
       typeof choice === "object" &&
       "message" in choice &&
       choice.message &&
-      typeof choice.message === "object" &&
-      "content" in choice.message
+      typeof choice.message === "object"
     ) {
-      const content = choice.message.content;
+      const message = choice.message as Record<string, unknown>;
+      const directReasoning = [
+        message.reasoning,
+        message.reasoning_content,
+      ]
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      const warnings = extractWarnings(response);
+
+      if (!("content" in message)) {
+        throw new Error("Provider response did not include message content.");
+      }
+
+      const content = message.content;
 
       if (typeof content === "string") {
-        return content;
+        return {
+          content,
+          reasoning: directReasoning || undefined,
+          warnings: warnings.length > 0 ? warnings : undefined,
+        };
       }
 
       if (Array.isArray(content)) {
-        const textParts = content
-          .filter(
-            (part): part is { type: string; text: string } =>
-              typeof part === "object" &&
-              part !== null &&
-              "type" in part &&
-              "text" in part &&
-              part.type === "text" &&
-              typeof part.text === "string"
-          )
-          .map((part) => part.text);
+        const textParts = collectTextParts(content, (part) =>
+          part.type === "text" && typeof part.text === "string"
+            ? part.text
+            : null
+        );
+        const reasoningParts = collectTextParts(content, (part) => {
+          if (
+            (part.type === "reasoning" ||
+              part.type === "reasoning_text" ||
+              part.type === "thinking") &&
+            typeof part.text === "string"
+          ) {
+            return part.text;
+          }
+
+          if (part.type === "thinking" && typeof part.thinking === "string") {
+            return part.thinking;
+          }
+
+          return null;
+        });
 
         if (textParts.length > 0) {
-          return textParts.join("\n");
+          return {
+            content: textParts.join("\n"),
+            reasoning:
+              [directReasoning, reasoningParts.join("\n")]
+                .filter(Boolean)
+                .join("\n\n") || undefined,
+            warnings: warnings.length > 0 ? warnings : undefined,
+          };
         }
       }
     }
@@ -360,34 +436,45 @@ function extractOpenAIStyleContent(response: unknown) {
   throw new Error("Provider response did not include message content.");
 }
 
-function extractClaudeContent(response: unknown) {
+function extractClaudeContent(response: unknown): ExtractedModelResponse {
   if (
     response &&
     typeof response === "object" &&
     "content" in response &&
     Array.isArray(response.content)
   ) {
-    const textBlocks = response.content
-      .filter(
-        (block): block is { type: string; text: string } =>
-          typeof block === "object" &&
-          block !== null &&
-          "type" in block &&
-          "text" in block &&
-          block.type === "text" &&
-          typeof block.text === "string"
-      )
-      .map((block) => block.text);
+    const textBlocks = collectTextParts(response.content, (block) =>
+      block.type === "text" && typeof block.text === "string"
+        ? block.text
+        : null
+    );
+    const reasoningBlocks = collectTextParts(response.content, (block) => {
+      if (block.type === "thinking" && typeof block.thinking === "string") {
+        return block.thinking;
+      }
+
+      if (block.type === "thinking" && typeof block.text === "string") {
+        return block.text;
+      }
+
+      return null;
+    });
 
     if (textBlocks.length > 0) {
-      return textBlocks.join("\n");
+      return {
+        content: textBlocks.join("\n"),
+        reasoning:
+          reasoningBlocks.length > 0
+            ? reasoningBlocks.join("\n\n")
+            : undefined,
+      };
     }
   }
 
   throw new Error("Claude response did not include text content.");
 }
 
-function extractOllamaContent(response: unknown) {
+function extractOllamaContent(response: unknown): ExtractedModelResponse {
   if (
     response &&
     typeof response === "object" &&
@@ -397,7 +484,9 @@ function extractOllamaContent(response: unknown) {
     "content" in response.message &&
     typeof response.message.content === "string"
   ) {
-    return response.message.content;
+    return {
+      content: response.message.content,
+    };
   }
 
   throw new Error("Ollama response did not include message content.");
@@ -454,7 +543,7 @@ async function fetchWithTimeout(
       console.info("[workflow-runtime] using corporate TLS path", {
         provider,
         host: getHostname(url),
-        caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+        caPath: CONFIGURED_CA_CERT_PATH || null,
         insecureTls: shouldAllowInsecureTls(url, provider),
       });
       return await httpsRequestToResponse(
@@ -469,7 +558,7 @@ async function fetchWithTimeout(
       console.info("[workflow-runtime] using fetch path", {
         provider,
         host: getHostname(url),
-        caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+        caPath: CONFIGURED_CA_CERT_PATH || null,
         insecureTls: shouldAllowInsecureTls(url, provider),
       });
       return await fetch(input, {
@@ -484,7 +573,7 @@ async function fetchWithTimeout(
         console.warn("[workflow-runtime] fetch TLS failed, retrying with https", {
           provider,
           host: getHostname(url),
-          caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+          caPath: CONFIGURED_CA_CERT_PATH || null,
           insecureTls: shouldAllowInsecureTls(url, provider),
           error:
             error instanceof Error
@@ -576,6 +665,12 @@ async function requestGroqStructured(
           },
         ],
         ...(responseFormat ? { response_format: responseFormat } : {}),
+        ...(input.maxTokens
+          ? {
+              max_completion_tokens: input.maxTokens,
+              max_tokens: input.maxTokens,
+            }
+          : {}),
         temperature: 0.2,
       }),
     }, input.provider);
@@ -703,8 +798,14 @@ async function requestOpenAIStructured(
             }
           : {
               type: "json_object",
-            }),
+          }),
       },
+      ...(input.maxTokens
+        ? {
+            max_completion_tokens: input.maxTokens,
+            max_tokens: input.maxTokens,
+          }
+        : {}),
       temperature: 0.2,
     }),
   }, input.provider);
@@ -785,6 +886,7 @@ async function requestOllamaStructured(
 export async function requestStructuredJson<T>(
   input: StructuredProviderRequestInput & {
     parse: (outputText: string) => T;
+    validate?: (data: T) => void;
     retryUserPrompt?: string;
   }
 ) {
@@ -828,19 +930,31 @@ export async function requestStructuredJson<T>(
   const firstOutput = await requestPrimary();
 
   try {
+    const parsed = input.parse(firstOutput.content);
+    input.validate?.(parsed);
+
     return {
-      data: input.parse(firstOutput),
+      data: parsed,
       effectiveModel,
       usedModelFallback: effectiveModel !== input.model,
+      rawOutput: firstOutput.content,
+      reasoning: firstOutput.reasoning,
+      warnings: firstOutput.warnings,
     };
   } catch (firstError) {
     const retryOutput = await requestRetry();
 
     try {
+      const parsed = input.parse(retryOutput.content);
+      input.validate?.(parsed);
+
       return {
-        data: input.parse(retryOutput),
+        data: parsed,
         effectiveModel,
         usedModelFallback: effectiveModel !== input.model,
+        rawOutput: retryOutput.content,
+        reasoning: retryOutput.reasoning,
+        warnings: retryOutput.warnings,
       };
     } catch {
       throw firstError;

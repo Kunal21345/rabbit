@@ -9,6 +9,16 @@ import {
   type KeyboardEvent,
 } from "react";
 import { ArrowUpIcon, Settings2Icon, SquarePen } from "lucide-react";
+import {
+  Message,
+  MessageContent,
+} from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -50,6 +60,7 @@ import {
   type WorkflowGenerationModel,
   type WorkflowProvider,
 } from "@/lib/workflow-generation";
+import { cn } from "@/lib/utils";
 
 type ChatRole = "assistant" | "user";
 
@@ -57,11 +68,18 @@ type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
+  reasoning?: string;
+  warnings?: string[];
+  model?: string;
 };
 
 type SubmitResult = {
   ok: boolean;
   message: string;
+  llmResponse?: string;
+  reasoning?: string;
+  warnings?: string[];
+  model?: string;
 };
 
 type WorkflowChatbotProps = {
@@ -107,12 +125,55 @@ function getModelForProvider(
   return getDefaultWorkflowModel(provider);
 }
 
-function createMessage(role: ChatRole, content: string): ChatMessage {
+function createMessage(
+  role: ChatRole,
+  content: string,
+  extra?: Partial<Omit<ChatMessage, "id" | "role" | "content">>
+): ChatMessage {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role,
     content,
+    ...extra,
   };
+}
+
+function normalizeReasoning(reasoning?: string) {
+  if (!reasoning) {
+    return undefined;
+  }
+
+  const trimmed = reasoning.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    trimmed.startsWith("```json") ||
+    trimmed.startsWith("```")
+  ) {
+    return undefined;
+  }
+
+  return trimmed;
+}
+
+function normalizeResponseMessage(message?: string, fallback?: string) {
+  const trimmed = message?.trim();
+
+  if (
+    trimmed &&
+    !trimmed.startsWith("{") &&
+    !trimmed.startsWith("[") &&
+    !trimmed.startsWith("```")
+  ) {
+    return trimmed;
+  }
+
+  return fallback?.trim() || "Workflow updated.";
 }
 
 const INITIAL_MESSAGE = createMessage(
@@ -201,7 +262,15 @@ export function WorkflowChatbot({
 
       setMessages((current) => [
         ...current,
-        createMessage("assistant", result.message),
+        createMessage(
+          "assistant",
+          normalizeResponseMessage(result.llmResponse, result.message),
+          {
+            reasoning: normalizeReasoning(result.reasoning),
+            warnings: result.warnings?.filter(Boolean),
+            model: result.model,
+          }
+        ),
       ]);
     } catch {
       setMessages((current) => [
@@ -310,34 +379,61 @@ export function WorkflowChatbot({
         <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
           <div className="flex flex-col gap-4 px-4 py-4">
             {messages.map((message) => (
-              <div
+              <Message
                 key={message.id}
-                className={`flex gap-2 ${
-                  message.role === "user" ? "justify-end" : "justify-start"
-                }`}
+                from={message.role}
+                className="max-w-full"
               >
-                {message.role === "assistant" ? (
-                  <div className="max-w-[92%] px-1 py-1 text-sm">
-                    <p className="whitespace-pre-wrap leading-relaxed text-foreground">
+                <div className="max-w-[92%]">
+                  {message.role === "assistant" && message.reasoning ? (
+                    <Reasoning className="mb-3" defaultOpen={false}>
+                      <ReasoningTrigger />
+                      <ReasoningContent>{message.reasoning}</ReasoningContent>
+                    </Reasoning>
+                  ) : null}
+
+                  <MessageContent
+                    className={cn(
+                      "rounded-2xl px-4 py-3",
+                      message.role === "assistant" &&
+                        "border border-border bg-card"
+                    )}
+                  >
+                    {message.warnings?.length ? (
+                      <div className="mb-3 flex flex-col gap-2">
+                        {message.warnings.map((warning, index) => (
+                          <div
+                            key={`${message.id}-warning-${index}`}
+                            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900"
+                          >
+                            AI SDK Warning: {warning}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
                       {message.content}
                     </p>
-                  </div>
-                ) : (
-                  <div className="max-w-[92%] rounded-2xl bg-muted px-3 py-2 text-sm text-foreground">
-                    <p className="whitespace-pre-wrap leading-relaxed">
-                      {message.content}
-                    </p>
-                  </div>
-                )}
-              </div>
+
+                    {message.model ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                        {message.model ? <span>Model: {message.model}</span> : null}
+                      </div>
+                    ) : null}
+                  </MessageContent>
+                </div>
+              </Message>
             ))}
 
             {loading ? (
-              <div className="flex justify-start">
-                <div className="rounded-2xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                  Generating workflow...
+              <Message from="assistant" className="max-w-full">
+                <div className="max-w-[92%]">
+                  <MessageContent className="rounded-2xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+                    <Shimmer duration={1.4}>Generating workflow...</Shimmer>
+                  </MessageContent>
                 </div>
-              </div>
+              </Message>
             ) : null}
           </div>
         </ScrollArea>

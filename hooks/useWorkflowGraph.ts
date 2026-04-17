@@ -43,6 +43,11 @@ export type WorkflowConnection = {
   target: string;
 };
 
+type WorkflowNodePositionUpdate = {
+  id: string;
+  position: WorkflowNode["position"];
+};
+
 type NewNodeSeed = Partial<
   Omit<WorkflowNodeData, "handles"> & {
     handles: Partial<WorkflowNodeData["handles"]>;
@@ -182,6 +187,45 @@ export function useWorkflowGraph(
     []
   );
 
+  const moveNodes = useCallback(
+    (updates: WorkflowNodePositionUpdate[]) => {
+      if (updates.length === 0) return;
+
+      const updatesById = new Map(
+        updates.map((update) => [update.id, update.position])
+      );
+
+      setNodes((prev) => {
+        let changed = false;
+
+        const next = prev.map((node) => {
+          const position = updatesById.get(node.id);
+
+          if (!position) {
+            return node;
+          }
+
+          if (
+            node.position.x === position.x &&
+            node.position.y === position.y
+          ) {
+            return node;
+          }
+
+          changed = true;
+
+          return {
+            ...node,
+            position,
+          };
+        });
+
+        return changed ? next : prev;
+      });
+    },
+    []
+  );
+
   /* ====================================================== */
   /* Connect Edge */
   /* ====================================================== */
@@ -297,6 +341,7 @@ export function useWorkflowGraph(
     addNode,
     updateNode,
     moveNode,
+    moveNodes,
     connectEdge,
     updateEdgeTarget,
     removeEdge,

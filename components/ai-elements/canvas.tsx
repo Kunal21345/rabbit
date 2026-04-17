@@ -66,6 +66,7 @@ type CanvasProps<N extends CanvasNode = CanvasNode, E extends CanvasEdge = Canva
   nodeTypes: NodeTypes<N["data"]>;
   edgeTypes?: EdgeTypes;
   fitView?: boolean;
+  resetViewKey?: number;
   style?: CSSProperties;
   className?: string;
   colorMode?: "light" | "dark";
@@ -78,6 +79,9 @@ type CanvasProps<N extends CanvasNode = CanvasNode, E extends CanvasEdge = Canva
   onNodePositionChange?: (
     nodeId: string,
     position: NodePosition
+  ) => void;
+  onNodesPositionChange?: (
+    updates: Array<{ id: string; position: NodePosition }>
   ) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
   onDeleteEdge?: (edgeId: string) => void;
@@ -173,6 +177,7 @@ export function Canvas<
   nodeTypes,
   edgeTypes = {},
   fitView = false,
+  resetViewKey = 0,
   style,
   className,
   colorMode = "light",
@@ -180,6 +185,7 @@ export function Canvas<
   children,
   onNodeClick,
   onNodePositionChange,
+  onNodesPositionChange,
   onDeleteNodes,
   onDeleteEdge,
   onConnect,
@@ -270,6 +276,14 @@ export function Canvas<
   });
   const [measurements, setMeasurements] = useState<Map<string, MeasuredNode>>(
     () => new Map()
+  );
+  const selectedNodeIdSet = useMemo(
+    () => new Set(selectedNodeIds),
+    [selectedNodeIds]
+  );
+  const selectedEdgeIdSet = useMemo(
+    () => new Set(selectedEdgeIds),
+    [selectedEdgeIds]
   );
   const nodeElementsRef = useRef<Map<string, HTMLDivElement>>(
     new Map()
@@ -439,6 +453,16 @@ export function Canvas<
 
   const activeViewport =
     fitView && !viewportLocked ? autoViewport : viewport;
+
+  useEffect(() => {
+    setViewport({
+      x: 80,
+      y: 80,
+      zoom: 1,
+    });
+    setViewportLocked(false);
+  }, [resetViewKey]);
+
   const themeReady = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -827,21 +851,35 @@ export function Canvas<
         };
       }
 
+      const updates: Array<{ id: string; position: NodePosition }> = [];
+
       pointerState.nodeIds.forEach((nodeId) => {
         const startPosition = pointerState.startPositions.get(nodeId);
         if (!startPosition) return;
 
-        onNodePositionChange?.(nodeId, {
-          x: startPosition.x + deltaX,
-          y: startPosition.y + deltaY,
+        updates.push({
+          id: nodeId,
+          position: {
+            x: startPosition.x + deltaX,
+            y: startPosition.y + deltaY,
+          },
         });
       });
+
+      if (onNodesPositionChange) {
+        onNodesPositionChange(updates);
+      } else {
+        updates.forEach((update) => {
+          onNodePositionChange?.(update.id, update.position);
+        });
+      }
     },
     [
       activeViewport.x,
       activeViewport.y,
       activeViewport.zoom,
       getTargetNodeAtClientPosition,
+      onNodesPositionChange,
       onNodePositionChange,
       updateSelectionFromRect,
     ]
@@ -1133,7 +1171,7 @@ export function Canvas<
               targetX,
               targetY,
             });
-            const isSelected = selectedEdgeIds.includes(edge.id);
+            const isSelected = selectedEdgeIdSet.has(edge.id);
 
             if (EdgeComponent) {
               return (
@@ -1327,14 +1365,17 @@ export function Canvas<
               onPointerDown={(event) => {
                 event.stopPropagation();
 
-                const isAlreadySelected = selectedNodeIds.includes(node.id);
+                const isAlreadySelected = selectedNodeIdSet.has(node.id);
                 const dragNodeIds = isAlreadySelected
                   ? selectedNodeIds
                   : [node.id];
+                const dragNodeIdSet = new Set(dragNodeIds);
                 const startPositions = new Map<string, NodePosition>();
 
                 nodes.forEach((candidateNode) => {
-                  if (!dragNodeIds.includes(candidateNode.id)) return;
+                  if (!dragNodeIdSet.has(candidateNode.id)) {
+                    return;
+                  }
                   startPositions.set(candidateNode.id, candidateNode.position);
                 });
 
@@ -1455,7 +1496,7 @@ export function Canvas<
               ) : null}
               <NodeComponent
                 data={node.data}
-                selected={selectedNodeIds.includes(node.id)}
+                selected={selectedNodeIdSet.has(node.id)}
               />
               {hoveredTargetNodeId === node.id ? (
                 <span className="pointer-events-none absolute left-0 top-1/2 z-30 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-primary/15" />

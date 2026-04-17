@@ -75,9 +75,9 @@ export const NodeContent = ({ className, ...props }: NodeContentProps) => (
 
 export type NodeFooterProps = ComponentProps<typeof CardFooter>;
 
-export const NodeFooter = ({ className, ...props }: NodeFooterProps) => (
-  <CardFooter
-    className={cn("rounded-b-md border-t bg-secondary p-3!", className)}
-    {...props}
-  />
-);
+// export const NodeFooter = ({ className, ...props }: NodeFooterProps) => (
+//   <CardFooter
+//     className={cn("rounded-b-md border-t bg-secondary p-3!", className)}
+//     {...props}
+//   />
+// );

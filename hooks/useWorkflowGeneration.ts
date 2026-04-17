@@ -68,6 +68,10 @@ export function useWorkflowGeneration({
           ok: true,
           message:
             "Workflow updated. Ask me for refinements if you want to tweak steps, labels, or business rules.",
+          llmResponse: graph.llmResponse,
+          reasoning: graph.reasoning,
+          warnings: graph.warnings,
+          model: graph.model,
         };
       } catch (error) {
         const errorMessage =

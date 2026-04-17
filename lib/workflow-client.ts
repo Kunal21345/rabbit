@@ -13,12 +13,20 @@ import type {
 export type WorkflowSubmitResult = {
   ok: boolean;
   message: string;
+  llmResponse?: string;
+  reasoning?: string;
+  warnings?: string[];
+  model?: string;
 };
 
 export type WorkflowGraphPayload = {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   title: string;
+  llmResponse?: string;
+  reasoning?: string;
+  warnings?: string[];
+  model?: string;
 };
 
 export async function generateWorkflowGraph(input: {
@@ -41,6 +49,14 @@ export async function generateWorkflowGraph(input: {
         details?: string;
         graph?: { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
         workflow?: { title?: string };
+        llm?: {
+          response?: string;
+          reasoning?: string;
+          warnings?: string[];
+        };
+        meta?: {
+          model?: string;
+        };
       }
     | null;
 
@@ -56,6 +72,10 @@ export async function generateWorkflowGraph(input: {
     nodes: payload.graph.nodes,
     edges: payload.graph.edges,
     title: payload.workflow?.title ?? "",
+    llmResponse: payload.llm?.response,
+    reasoning: payload.llm?.reasoning,
+    warnings: payload.llm?.warnings,
+    model: payload.meta?.model,
   };
 }
 
