@@ -101,7 +101,7 @@ function buildPrompt(input: WorkflowGraphRequest) {
     "The graph may add, remove, or rename nodes as needed.",
     "Every node must have stable slug-style ids.",
     "Use direct unlabeled edges between nodes.",
-    "First, identify the core happy path and render that base path as a linear sequence of steps from start to finish.",
+    "First, identify the core path and render that base path as a linear sequence of steps from start to finish.",
     "The happy path must remain the primary backbone of the workflow.",
     "A node may connect to multiple target nodes only when that core step is a true decision, approval, validation, status check, timeout, missing-input check, or business-rule split.",
     "For ordinary action steps, continue the workflow as a single next step on the linear happy path.",
