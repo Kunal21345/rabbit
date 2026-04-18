@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./public/logo.svg" alt="AI Workflow Builder logo" width="84" />
+  <img src="./rabbit.svg" alt="AI Workflow Builder logo" width="400" />
 </p>
 
 <h1 align="center">AI Workflow Builder</h1>
