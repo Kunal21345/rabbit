@@ -11,6 +11,9 @@ export type WorkflowNodeData = {
   description: string;
   details: string;
   suggestions: string;
+  category?: string;
+  categoryLabel?: string;
+  categoryTone?: string;
 
   hidden?: boolean;
 

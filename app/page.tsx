@@ -13,6 +13,7 @@ import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge as CustomEdge } from "@/components/ai-elements/edge";
 import { WorkflowToolbar } from "@/components/workflow-toolbar";
 import { WorkflowChatbot } from "@/components/workflow-chatbot";
+import { Badge } from "@/components/ui/badge";
 
 import {
   Node as CustomNode,
@@ -233,6 +234,219 @@ function buildNodeDetailsCacheKey(input: {
   });
 }
 
+type WorkflowCategory =
+  | "entry"
+  | "integration"
+  | "processing"
+  | "decision"
+  | "validation"
+  | "review"
+  | "delivery"
+  | "operations";
+
+const WORKFLOW_CATEGORY_ORDER: WorkflowCategory[] = [
+  "entry",
+  "integration",
+  "processing",
+  "decision",
+  "validation",
+  "review",
+  "delivery",
+  "operations",
+];
+
+const WORKFLOW_CATEGORY_META: Record<
+  WorkflowCategory,
+  {
+    label: string;
+    badgeClassName: string;
+    cardClassName: string;
+    headerClassName: string;
+    accentClassName: string;
+    legendClassName: string;
+  }
+> = {
+  entry: {
+    label: "Entry",
+    badgeClassName:
+      "border-sky-200 bg-sky-100 text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/60 dark:text-sky-200",
+    cardClassName:
+      "border-sky-200/80 bg-sky-50/70 dark:border-sky-900/50 dark:bg-sky-950/20",
+    headerClassName:
+      "border-sky-200/80 bg-linear-to-r from-sky-100 to-cyan-50 dark:border-sky-900/50 dark:from-sky-950/70 dark:to-cyan-950/40",
+    accentClassName: "bg-sky-500",
+    legendClassName: "bg-sky-500",
+  },
+  integration: {
+    label: "Integration",
+    badgeClassName:
+      "border-violet-200 bg-violet-100 text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/60 dark:text-violet-200",
+    cardClassName:
+      "border-violet-200/80 bg-violet-50/70 dark:border-violet-900/50 dark:bg-violet-950/20",
+    headerClassName:
+      "border-violet-200/80 bg-linear-to-r from-violet-100 to-fuchsia-50 dark:border-violet-900/50 dark:from-violet-950/70 dark:to-fuchsia-950/40",
+    accentClassName: "bg-violet-500",
+    legendClassName: "bg-violet-500",
+  },
+  processing: {
+    label: "Processing",
+    badgeClassName:
+      "border-blue-200 bg-blue-100 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/60 dark:text-blue-200",
+    cardClassName:
+      "border-blue-200/80 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20",
+    headerClassName:
+      "border-blue-200/80 bg-linear-to-r from-blue-100 to-indigo-50 dark:border-blue-900/50 dark:from-blue-950/70 dark:to-indigo-950/40",
+    accentClassName: "bg-blue-500",
+    legendClassName: "bg-blue-500",
+  },
+  decision: {
+    label: "Decision",
+    badgeClassName:
+      "border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/60 dark:text-amber-200",
+    cardClassName:
+      "border-amber-200/80 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20",
+    headerClassName:
+      "border-amber-200/80 bg-linear-to-r from-amber-100 to-yellow-50 dark:border-amber-900/50 dark:from-amber-950/70 dark:to-yellow-950/40",
+    accentClassName: "bg-amber-500",
+    legendClassName: "bg-amber-500",
+  },
+  validation: {
+    label: "Validation",
+    badgeClassName:
+      "border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-200",
+    cardClassName:
+      "border-emerald-200/80 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/20",
+    headerClassName:
+      "border-emerald-200/80 bg-linear-to-r from-emerald-100 to-teal-50 dark:border-emerald-900/50 dark:from-emerald-950/70 dark:to-teal-950/40",
+    accentClassName: "bg-emerald-500",
+    legendClassName: "bg-emerald-500",
+  },
+  review: {
+    label: "Review",
+    badgeClassName:
+      "border-rose-200 bg-rose-100 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/60 dark:text-rose-200",
+    cardClassName:
+      "border-rose-200/80 bg-rose-50/70 dark:border-rose-900/50 dark:bg-rose-950/20",
+    headerClassName:
+      "border-rose-200/80 bg-linear-to-r from-rose-100 to-pink-50 dark:border-rose-900/50 dark:from-rose-950/70 dark:to-pink-950/40",
+    accentClassName: "bg-rose-500",
+    legendClassName: "bg-rose-500",
+  },
+  delivery: {
+    label: "Delivery",
+    badgeClassName:
+      "border-lime-200 bg-lime-100 text-lime-900 dark:border-lime-900/60 dark:bg-lime-950/60 dark:text-lime-200",
+    cardClassName:
+      "border-lime-200/80 bg-lime-50/70 dark:border-lime-900/50 dark:bg-lime-950/20",
+    headerClassName:
+      "border-lime-200/80 bg-linear-to-r from-lime-100 to-green-50 dark:border-lime-900/50 dark:from-lime-950/70 dark:to-green-950/40",
+    accentClassName: "bg-lime-500",
+    legendClassName: "bg-lime-500",
+  },
+  operations: {
+    label: "Operations",
+    badgeClassName:
+      "border-slate-200 bg-slate-100 text-slate-800 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-200",
+    cardClassName:
+      "border-slate-200/80 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-950/20",
+    headerClassName:
+      "border-slate-200/80 bg-linear-to-r from-slate-100 to-zinc-50 dark:border-slate-800 dark:from-slate-950/70 dark:to-zinc-950/40",
+    accentClassName: "bg-slate-500",
+    legendClassName: "bg-slate-500",
+  },
+};
+
+function inferWorkflowCategory(input: {
+  id: string;
+  label: string;
+  description: string;
+  incomingCount: number;
+  outgoingCount: number;
+}): WorkflowCategory {
+  const text = `${input.id} ${input.label} ${input.description}`.toLowerCase();
+
+  if (
+    text.includes("start") ||
+    text.includes("intake") ||
+    text.includes("request") ||
+    text.includes("collect") ||
+    input.incomingCount === 0
+  ) {
+    return "entry";
+  }
+
+  if (
+    text.includes("api") ||
+    text.includes("import") ||
+    text.includes("export") ||
+    text.includes("sync") ||
+    text.includes("connect") ||
+    text.includes("webhook") ||
+    text.includes("fetch")
+  ) {
+    return "integration";
+  }
+
+  if (
+    text.includes("decision") ||
+    text.includes("approve") ||
+    text.includes("reject") ||
+    text.includes("branch") ||
+    text.includes("route") ||
+    text.includes("if ") ||
+    input.outgoingCount > 1
+  ) {
+    return "decision";
+  }
+
+  if (
+    text.includes("validate") ||
+    text.includes("check") ||
+    text.includes("verify") ||
+    text.includes("qa") ||
+    text.includes("test") ||
+    text.includes("audit")
+  ) {
+    return "validation";
+  }
+
+  if (
+    text.includes("review") ||
+    text.includes("assess") ||
+    text.includes("analyze") ||
+    text.includes("inspect") ||
+    text.includes("triage")
+  ) {
+    return "review";
+  }
+
+  if (
+    text.includes("deploy") ||
+    text.includes("publish") ||
+    text.includes("release") ||
+    text.includes("handoff") ||
+    text.includes("deliver") ||
+    text.includes("complete") ||
+    text.includes("finish") ||
+    text.includes("end")
+  ) {
+    return "delivery";
+  }
+
+  if (
+    text.includes("monitor") ||
+    text.includes("alert") ||
+    text.includes("support") ||
+    text.includes("operate") ||
+    text.includes("maintain") ||
+    text.includes("observe")
+  ) {
+    return "operations";
+  }
+
+  return "processing";
+}
+
 /* ====================================================== */
 /* Node Renderer */
 /* ====================================================== */
@@ -249,11 +463,37 @@ const WorkflowNodeRenderer = memo(
   }) {
     if (data.hidden) return null;
 
+    const category =
+      WORKFLOW_CATEGORY_META[
+        (data.category as WorkflowCategory | undefined) || "processing"
+      ];
+
     return (
-      <CustomNode handles={data.handles} selected={selected}>
-        <NodeHeader>
-          <NodeTitle>{data.label}</NodeTitle>
-          <NodeDescription className="line-clamp-2 text-xs leading-relaxed">
+      <CustomNode
+        handles={data.handles}
+        selected={selected}
+        className={cn(
+          "shadow-[0_18px_50px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xs",
+          category.cardClassName
+        )}
+      >
+        <NodeHeader className={cn("relative", category.headerClassName)}>
+          <span
+            className={cn(
+              "absolute inset-y-0 left-0 w-1.5",
+              category.accentClassName
+            )}
+          />
+          <div className="ml-3 grid gap-2">
+            <Badge
+              variant="outline"
+              className={cn("rounded-md px-2 py-1 text-[10px]", category.badgeClassName)}
+            >
+              {data.categoryLabel || category.label}
+            </Badge>
+            <NodeTitle>{data.label}</NodeTitle>
+          </div>
+          <NodeDescription className="line-clamp-2 px-3 text-xs leading-relaxed">
             {data.description || "Step description"}
           </NodeDescription>
         </NodeHeader>
@@ -382,6 +622,54 @@ export default function WorkflowBuilder() {
     () => new Map(nodes.map((node) => [node.id, node])),
     [nodes]
   );
+
+  const categorizedNodes = useMemo(() => {
+    const incomingCount = new Map<string, number>();
+    const outgoingCount = new Map<string, number>();
+
+    edges.forEach((edge) => {
+      incomingCount.set(edge.target, (incomingCount.get(edge.target) || 0) + 1);
+      outgoingCount.set(edge.source, (outgoingCount.get(edge.source) || 0) + 1);
+    });
+
+    return nodes.map((node) => {
+      const category = inferWorkflowCategory({
+        id: node.id,
+        label: node.data.label,
+        description: node.data.description,
+        incomingCount: incomingCount.get(node.id) || 0,
+        outgoingCount: outgoingCount.get(node.id) || 0,
+      });
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          category,
+          categoryLabel: WORKFLOW_CATEGORY_META[category].label,
+          categoryTone: WORKFLOW_CATEGORY_META[category].accentClassName,
+        },
+      };
+    });
+  }, [edges, nodes]);
+
+  const categoryLegend = useMemo(() => {
+    const counts = new Map<WorkflowCategory, number>();
+
+    categorizedNodes.forEach((node) => {
+      const category = (node.data.category as WorkflowCategory | undefined) || "processing";
+      counts.set(category, (counts.get(category) || 0) + 1);
+    });
+
+    return WORKFLOW_CATEGORY_ORDER
+      .filter((category) => counts.has(category))
+      .map((category) => ({
+        category,
+        label: WORKFLOW_CATEGORY_META[category].label,
+        count: counts.get(category) || 0,
+        tone: WORKFLOW_CATEGORY_META[category].legendClassName,
+      }));
+  }, [categorizedNodes]);
 
 
   /* ====================================================== */
@@ -779,7 +1067,7 @@ export default function WorkflowBuilder() {
 
             <div className="relative h-full w-full">
               <Canvas
-                nodes={nodes}
+                nodes={categorizedNodes}
                 edges={edges}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
@@ -792,6 +1080,28 @@ export default function WorkflowBuilder() {
                 fitView
                 resetViewKey={canvasResetKey}
               />
+              {categoryLegend.length > 0 ? (
+                <div className="pointer-events-none absolute left-3 bottom-3 z-20 max-w-[min(32rem,calc(100%-5rem))] rounded-xl border border-border/70 bg-background/90 p-3 shadow-lg backdrop-blur-sm">
+                  <div className="mb-2 flex items-center gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      Workflow Domains
+                    </p>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {categoryLegend.map((item) => (
+                      <div
+                        key={item.category}
+                        className="flex items-center gap-2 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-xs text-foreground"
+                      >
+                        <span className={cn("h-2.5 w-2.5 rounded-full", item.tone)} />
+                        <span className="font-medium">{item.label}</span>
+                        <span className="text-muted-foreground">{item.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div className="pointer-events-auto absolute bottom-3 right-3 z-20">
                 <ThemeToggle />
               </div>
