@@ -4,7 +4,7 @@
 
 <h1 align="center">AI Workflow Builder</h1>
 
-<p align="center">
+<p>
   AI Workflow Builder is a Next.js app for designing node-based business workflows with AI help.
   You can describe a process in plain language, generate or replace the workflow graph, rearrange
   steps on the canvas, and enrich individual nodes with AI-generated operational details.
