@@ -3,7 +3,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
-  title: "AI Workflow Builder",
+  title: "Rabbit - AI Workflow Editor",
   description: "Design, edit, and refine workflow graphs with AI-assisted generation.",
 };
 
