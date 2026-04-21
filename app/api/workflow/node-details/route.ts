@@ -115,22 +115,23 @@ function normalizeRequest(
 }
 
 function buildPrompt(input: WorkflowNodeDetailsRequest) {
+  const previousSteps = input.context?.previousSteps?.map((step) => step.label).join(", ");
+  const nextSteps = input.context?.nextSteps?.map((step) => step.label).join(", ");
+
   return [
-    "Write the sheet content for exactly one workflow step.",
-    "Return only description, details, and suggestions.",
+    "Return JSON with description, details, suggestions.",
+    "Keep it concise.",
     "Do not rename the step.",
-    "Do not invent new nodes, branching, or business rules outside the provided context.",
-    "description must be one short sentence.",
-    "details should be concise and practical.",
-    "suggestions should be short, actionable guidance.",
-    "",
-    `Workflow goal:\n${input.prompt}`,
-    "",
-    `Current step:\n${JSON.stringify(input.node, null, 2)}`,
-    "",
-    input.context
-      ? `Local step context:\n${JSON.stringify(input.context, null, 2)}`
-      : "Local step context:\nNone",
+    `Workflow: ${input.prompt}`,
+    `Step: ${input.node.label}${input.node.description ? ` - ${input.node.description}` : ""}`,
+    input.context?.workflowTitle
+      ? `Title: ${input.context.workflowTitle}`
+      : "",
+    input.context?.workflowSummary
+      ? `Summary: ${input.context.workflowSummary}`
+      : "",
+    previousSteps ? `Previous: ${previousSteps}` : "",
+    nextSteps ? `Next: ${nextSteps}` : "",
   ].join("\n");
 }
 
@@ -273,7 +274,7 @@ export async function POST(request: Request) {
       fallbackSystemPrompt:
         "You are a workflow detail writer. Return ONLY one valid JSON object and no markdown.",
       userPrompt: buildPrompt(payload),
-      maxTokens: 512,
+      maxTokens: 256,
       parse: parseGeneratedNodeDetails,
     });
 

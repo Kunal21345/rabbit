@@ -4,8 +4,11 @@ import type {
 } from "@/hooks/useWorkflowGraph";
 import type {
   GeneratedWorkflowNodeDetails,
+  GeneratedWorkflowNodeDetailsBatchItem,
+  WorkflowConversationContextMessage,
   WorkflowGraphContext,
   WorkflowNodeDetailsRequest,
+  WorkflowNodeDetailsBatchRequest,
   WorkflowGenerationModel,
   WorkflowProvider,
 } from "@/lib/workflow-generation";
@@ -34,6 +37,7 @@ export async function generateWorkflowGraph(input: {
   model: WorkflowGenerationModel;
   provider: WorkflowProvider;
   currentGraph: WorkflowGraphContext;
+  conversationContext?: WorkflowConversationContextMessage[];
 }): Promise<WorkflowGraphPayload> {
   const response = await fetch("/api/workflow/generate", {
     method: "POST",
@@ -107,4 +111,34 @@ export async function generateWorkflowNodeDetails(
   }
 
   return payload.nodeDetails;
+}
+
+export async function generateWorkflowNodeDetailsBatch(
+  input: WorkflowNodeDetailsBatchRequest
+): Promise<GeneratedWorkflowNodeDetailsBatchItem[]> {
+  const response = await fetch("/api/workflow/node-details/batch", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        error?: string;
+        details?: string;
+        items?: GeneratedWorkflowNodeDetailsBatchItem[];
+      }
+    | null;
+
+  if (!response.ok || !payload?.items) {
+    throw new Error(
+      payload?.details ||
+        payload?.error ||
+        "Failed to generate workflow node details."
+    );
+  }
+
+  return payload.items;
 }

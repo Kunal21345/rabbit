@@ -36,12 +36,15 @@ import {
 import { useWorkflowGeneration } from "@/hooks/useWorkflowGeneration";
 import { useWorkflowPersistenceState } from "@/hooks/useWorkflowPersistenceState";
 import { useResizableChatbotPanel } from "@/hooks/useResizableChatbotPanel";
-import { generateWorkflowNodeDetails } from "@/lib/workflow-client";
 import {
-  getDefaultWorkflowModel,
+  generateWorkflowNodeDetails,
+  generateWorkflowNodeDetailsBatch,
+} from "@/lib/workflow-client";
+import {
   isWorkflowProvider,
   LLM_PROVIDER_STORAGE_KEY,
   type GeneratedWorkflowNodeDetails,
+  type WorkflowConversationContextMessage,
   type WorkflowGenerationModel,
   type WorkflowProvider,
 } from "@/lib/workflow-generation";
@@ -66,6 +69,34 @@ type WorkflowSubmitResult = {
   warnings?: string[];
   model?: string;
 };
+
+const NODE_DETAILS_MAX_RETRIES = 2;
+const FAST_NODE_DETAILS_MODEL_BY_PROVIDER: Record<
+  WorkflowProvider,
+  WorkflowGenerationModel
+> = {
+  openai: "gpt-4.1-mini",
+  claude: "claude-3-5-sonnet-latest",
+  groq: "llama-3.3-70b-versatile",
+  ollama: "llama3.2:3b",
+};
+
+function isRetriableNodeDetailError(message: string) {
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("timed out") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("429") ||
+    normalized.includes("500") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("overloaded") ||
+    normalized.includes("temporarily unavailable") ||
+    normalized.includes("network error")
+  );
+}
 
 /* ====================================================== */
 
@@ -146,6 +177,7 @@ const STORAGE_KEY = `workflow-graph-${hashSeedGraph(
     edges: initialEdges,
   })
 )}`;
+const NODE_DETAILS_CACHE_STORAGE_KEY = `${STORAGE_KEY}-node-details-cache-v1`;
 
 /* ====================================================== */
 /* Helpers */
@@ -212,6 +244,139 @@ function buildWorkflowSummary(nodes: WorkflowNode[], edges: WorkflowEdge[]) {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function buildNodeDetailsGoalPrompt(input: {
+  workflowPrompt?: string;
+  workflowTitle: string;
+  workflowSummary: string;
+}) {
+  const compactPrompt = input.workflowPrompt?.replace(/\s+/g, " ").trim();
+
+  return [
+    `Workflow title: ${input.workflowTitle || "Current workflow"}`,
+    compactPrompt ? `Goal: ${compactPrompt.slice(0, 280)}` : "",
+    input.workflowSummary,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function getFastNodeDetailsSettings(provider: WorkflowProvider) {
+  return {
+    provider,
+    model: FAST_NODE_DETAILS_MODEL_BY_PROVIDER[provider],
+  };
+}
+
+function readNodeDetailsCache() {
+  if (typeof window === "undefined") {
+    return new Map<string, GeneratedWorkflowNodeDetails>();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(NODE_DETAILS_CACHE_STORAGE_KEY);
+
+    if (!raw) {
+      return new Map<string, GeneratedWorkflowNodeDetails>();
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return new Map<string, GeneratedWorkflowNodeDetails>();
+    }
+
+    return new Map(
+      parsed.filter(
+        (
+          entry
+        ): entry is [string, GeneratedWorkflowNodeDetails] =>
+          Array.isArray(entry) &&
+          entry.length === 2 &&
+          typeof entry[0] === "string" &&
+          typeof entry[1] === "object" &&
+          entry[1] !== null &&
+          "description" in entry[1] &&
+          "details" in entry[1] &&
+          "suggestions" in entry[1]
+      )
+    );
+  } catch {
+    return new Map<string, GeneratedWorkflowNodeDetails>();
+  }
+}
+
+function writeNodeDetailsCache(
+  cache: Map<string, GeneratedWorkflowNodeDetails>
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    NODE_DETAILS_CACHE_STORAGE_KEY,
+    JSON.stringify([...cache.entries()])
+  );
+}
+
+function applyNodeDetailsFromCache(
+  nodes: WorkflowNode[],
+  nodeDetailsPlan: Array<{
+    node: WorkflowNode;
+    cacheKey: string;
+  }>,
+  cache: Map<string, GeneratedWorkflowNodeDetails>
+) {
+  const detailsByNodeId = new Map<string, GeneratedWorkflowNodeDetails>();
+
+  nodeDetailsPlan.forEach((entry) => {
+    const cached = cache.get(entry.cacheKey);
+
+    if (cached) {
+      detailsByNodeId.set(entry.node.id, cached);
+    }
+  });
+
+  if (detailsByNodeId.size === 0) {
+    return nodes;
+  }
+
+  let changed = false;
+
+  const nextNodes = nodes.map((node) => {
+    const cached = detailsByNodeId.get(node.id);
+
+    if (!cached) {
+      return node;
+    }
+
+    const nextDescription = cached.description.trim() || node.data.description;
+    const nextDetails = cached.details.trim();
+    const nextSuggestions = cached.suggestions.trim();
+
+    if (
+      node.data.description === nextDescription &&
+      node.data.details === nextDetails &&
+      node.data.suggestions === nextSuggestions
+    ) {
+      return node;
+    }
+
+    changed = true;
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        description: nextDescription,
+        details: nextDetails,
+        suggestions: nextSuggestions,
+      },
+    };
+  });
+
+  return changed ? nextNodes : nodes;
 }
 
 function buildNodeDetailsCacheKey(input: {
@@ -553,12 +718,16 @@ export default function WorkflowBuilder() {
     useState(false);
   const [canvasResetKey, setCanvasResetKey] =
     useState(0);
+  const [chatbotClearKey, setChatbotClearKey] =
+    useState(0);
   const [autoGenerateNodeDetails, setAutoGenerateNodeDetails] =
     useState(false);
   const [pendingNodeDetailKeys, setPendingNodeDetailKeys] =
     useState<string[]>([]);
   const [nodeDetailErrors, setNodeDetailErrors] =
     useState<Record<string, string>>({});
+  const [nodeDetailRetryTick, setNodeDetailRetryTick] =
+    useState(0);
   const lastWorkflowPromptRef = useRef("");
   const lastWorkflowTitleRef = useRef("Current workflow");
   const lastWorkflowSettingsRef = useRef<{
@@ -567,6 +736,11 @@ export default function WorkflowBuilder() {
   } | null>(null);
   const requestedNodeDetailsKeysRef = useRef(new Set<string>());
   const failedNodeDetailsKeysRef = useRef(new Set<string>());
+  const nodeDetailRetryCountsRef = useRef(new Map<string, number>());
+  const nodeDetailsCacheRef = useRef(
+    new Map<string, GeneratedWorkflowNodeDetails>()
+  );
+  const nodeDetailsCacheHydratedRef = useRef(false);
   const unmountedRef = useRef(false);
   const { clearPersistedGraph } = useWorkflowPersistenceState({
     storageKey: STORAGE_KEY,
@@ -599,8 +773,10 @@ export default function WorkflowBuilder() {
       setAutoGenerateNodeDetails(false);
       setPendingNodeDetailKeys([]);
       setNodeDetailErrors({});
+      setNodeDetailRetryTick(0);
       requestedNodeDetailsKeysRef.current.clear();
       failedNodeDetailsKeysRef.current.clear();
+      nodeDetailRetryCountsRef.current.clear();
     },
   });
 
@@ -704,6 +880,16 @@ export default function WorkflowBuilder() {
     [nodes]
   );
 
+  const workflowGoalPrompt = useMemo(
+    () => buildWorkflowGoalPrompt(nodes),
+    [nodes]
+  );
+
+  const workflowSummary = useMemo(
+    () => buildWorkflowSummary(nodes, edges),
+    [nodes, edges]
+  );
+
   const nodeDetailsPlan = useMemo(() => {
     return nodes.map((node) => {
       const previousSteps = (incomingEdgeMap.get(node.id) || [])
@@ -757,23 +943,36 @@ export default function WorkflowBuilder() {
     });
   }, [edgeMap, incomingEdgeMap, nodes, nodesById]);
 
+  const nodeDetailsPlanById = useMemo(
+    () => new Map(nodeDetailsPlan.map((entry) => [entry.node.id, entry])),
+    [nodeDetailsPlan]
+  );
+  const nodeDetailsCachePlanSignature = useMemo(
+    () =>
+      nodeDetailsPlan
+        .map((entry) => `${entry.node.id}:${entry.cacheKey}`)
+        .join("|"),
+    [nodeDetailsPlan]
+  );
+
   const selectedNodeDetailsKey = useMemo(() => {
     if (!selectedNodeId) {
       return null;
     }
 
-    return (
-      nodeDetailsPlan.find((entry) => entry.node.id === selectedNodeId)
-        ?.cacheKey || null
-    );
-  }, [nodeDetailsPlan, selectedNodeId]);
+    return nodeDetailsPlanById.get(selectedNodeId)?.cacheKey || null;
+  }, [nodeDetailsPlanById, selectedNodeId]);
 
   const handleNodeClick = useCallback(
     (_event: MouseEvent<HTMLDivElement>, node: WorkflowNode) => {
+      if (nodeDetailsPlanById.get(node.id)?.needsDetails) {
+        setAutoGenerateNodeDetails(true);
+      }
+
       setSelectedNodeId(node.id);
       setSheetOpen(true);
     },
-    []
+    [nodeDetailsPlanById]
   );
 
   const handleDeleteNodes = useCallback(
@@ -818,7 +1017,8 @@ export default function WorkflowBuilder() {
     async (
       prompt: string,
       model: WorkflowGenerationModel,
-      provider: WorkflowProvider
+      provider: WorkflowProvider,
+      conversationContext?: WorkflowConversationContextMessage[]
     ): Promise<WorkflowSubmitResult> => {
       lastWorkflowPromptRef.current = prompt;
       lastWorkflowSettingsRef.current = {
@@ -828,7 +1028,8 @@ export default function WorkflowBuilder() {
       const result = await submitPrompt(
         prompt,
         model,
-        provider
+        provider,
+        conversationContext
       );
 
       if (result.ok) {
@@ -843,100 +1044,124 @@ export default function WorkflowBuilder() {
   useEffect(() => {
     unmountedRef.current = false;
 
+    if (!nodeDetailsCacheHydratedRef.current) {
+      nodeDetailsCacheRef.current = readNodeDetailsCache();
+      nodeDetailsCacheHydratedRef.current = true;
+    }
+
     return () => {
       unmountedRef.current = true;
     };
   }, []);
 
   useEffect(() => {
+    if (!nodeDetailsCacheHydratedRef.current) {
+      nodeDetailsCacheRef.current = readNodeDetailsCache();
+      nodeDetailsCacheHydratedRef.current = true;
+    }
+
+    setNodes((currentNodes) =>
+      applyNodeDetailsFromCache(
+        currentNodes,
+        nodeDetailsPlan,
+        nodeDetailsCacheRef.current
+      )
+    );
+  }, [nodeDetailsCachePlanSignature, nodeDetailsPlan, setNodes]);
+
+  useEffect(() => {
     if (!autoGenerateNodeDetails) {
       return;
     }
 
-    const pendingEntries = nodeDetailsPlan.filter(
-      (entry) =>
-        entry.needsDetails &&
-        !requestedNodeDetailsKeysRef.current.has(entry.cacheKey) &&
-        !failedNodeDetailsKeysRef.current.has(entry.cacheKey)
-    );
+    if (!nodeDetailsCacheHydratedRef.current) {
+      nodeDetailsCacheRef.current = readNodeDetailsCache();
+      nodeDetailsCacheHydratedRef.current = true;
+    }
 
-    if (pendingEntries.length === 0) {
+    const allPendingEntries = nodeDetailsPlan
+      .filter(
+        (entry) =>
+          entry.needsDetails &&
+          !requestedNodeDetailsKeysRef.current.has(entry.cacheKey) &&
+          !failedNodeDetailsKeysRef.current.has(entry.cacheKey)
+      )
+      .sort((left, right) => {
+        if (left.node.id === selectedNodeId && right.node.id !== selectedNodeId) {
+          return -1;
+        }
+
+        if (right.node.id === selectedNodeId && left.node.id !== selectedNodeId) {
+          return 1;
+        }
+
+        return 0;
+      });
+
+    if (allPendingEntries.length === 0) {
       return;
     }
 
+    const pendingEntries = allPendingEntries;
+    const cachedEntries: typeof pendingEntries = [];
+    const uncachedEntries: typeof pendingEntries = [];
+
     pendingEntries.forEach((entry) => {
-      requestedNodeDetailsKeysRef.current.add(entry.cacheKey);
-    });
-
-    setPendingNodeDetailKeys((current) => [
-      ...new Set([
-        ...current,
-        ...pendingEntries.map((entry) => entry.cacheKey),
-      ]),
-    ]);
-
-    const workflowSettings =
-      lastWorkflowSettingsRef.current || {
-        model: getDefaultWorkflowModel(getStoredDetailProvider()),
-        provider: getStoredDetailProvider(),
-      };
-    const workflowPrompt =
-      lastWorkflowPromptRef.current || buildWorkflowGoalPrompt(nodes);
-
-    const DETAILS_BATCH_CONCURRENCY =
-      workflowSettings.provider === "groq" ? 1 : 2;
-    const workflowSummary = buildWorkflowSummary(nodes, edges);
-    const runNodeDetailsBatch = async () => {
-      const results: PromiseSettledResult<{
-        cacheKey: string;
-        nodeId: string;
-        nodeDetails: GeneratedWorkflowNodeDetails;
-      }>[] = [];
-
-      for (
-        let index = 0;
-        index < pendingEntries.length;
-        index += DETAILS_BATCH_CONCURRENCY
-      ) {
-        const batch = pendingEntries.slice(
-          index,
-          index + DETAILS_BATCH_CONCURRENCY
-        );
-
-        const batchResults = await Promise.allSettled(
-          batch.map(async (entry) => {
-            const nodeDetails = await generateWorkflowNodeDetails({
-              prompt: workflowPrompt,
-              model: workflowSettings.model,
-              provider: workflowSettings.provider,
-              node: {
-                id: entry.node.id,
-                label: entry.node.data.label,
-                description: entry.node.data.description,
-              },
-              context: {
-                workflowTitle: "Current workflow",
-                workflowSummary,
-                previousSteps: entry.previousSteps,
-                nextSteps: entry.nextSteps,
-              },
-            });
-
-            return {
-              cacheKey: entry.cacheKey,
-              nodeId: entry.node.id,
-              nodeDetails,
-            };
-          })
-        );
-
-        results.push(...batchResults);
+      if (nodeDetailsCacheRef.current.has(entry.cacheKey)) {
+        cachedEntries.push(entry);
+        return;
       }
 
-      return results;
-    };
+      requestedNodeDetailsKeysRef.current.add(entry.cacheKey);
+      uncachedEntries.push(entry);
+    });
 
-    runNodeDetailsBatch().then((results) => {
+    if (uncachedEntries.length === 0 && cachedEntries.length === 0) {
+      return;
+    }
+
+    const pendingKeysTimeoutId = window.setTimeout(() => {
+      setPendingNodeDetailKeys((current) => [
+        ...new Set([
+          ...current,
+          ...uncachedEntries.map((entry) => entry.cacheKey),
+        ]),
+      ]);
+    }, 0);
+
+    const workflowSettings = getFastNodeDetailsSettings(
+      (
+        lastWorkflowSettingsRef.current?.provider ||
+        getStoredDetailProvider()
+      )
+    );
+    const nodeDetailsGoalPrompt = buildNodeDetailsGoalPrompt({
+      workflowPrompt: lastWorkflowPromptRef.current,
+      workflowTitle: lastWorkflowTitleRef.current,
+      workflowSummary,
+    });
+    const workflowPrompt = nodeDetailsGoalPrompt || workflowGoalPrompt;
+    const runNodeDetailsBatch = async () =>
+      uncachedEntries.length === 0
+        ? []
+        : generateWorkflowNodeDetailsBatch({
+            prompt: workflowPrompt,
+            model: workflowSettings.model,
+            provider: workflowSettings.provider,
+            context: {
+              workflowTitle: lastWorkflowTitleRef.current,
+              workflowSummary,
+            },
+            nodes: uncachedEntries.map((entry) => ({
+              id: entry.node.id,
+              label: entry.node.data.label,
+              description: entry.node.data.description,
+              previousSteps: entry.previousSteps,
+              nextSteps: entry.nextSteps,
+            })),
+          });
+
+    runNodeDetailsBatch().then(async (items) => {
       if (unmountedRef.current) {
         return;
       }
@@ -947,28 +1172,98 @@ export default function WorkflowBuilder() {
       >();
       const nextErrors: Record<string, string> = {};
 
-      results.forEach((result, index) => {
-        const entry = pendingEntries[index];
+      cachedEntries.forEach((entry) => {
+        const cachedNodeDetails = nodeDetailsCacheRef.current.get(entry.cacheKey);
 
-        if (result.status === "fulfilled") {
-          failedNodeDetailsKeysRef.current.delete(entry.cacheKey);
-          successfulDetails.set(
-            result.value.nodeId,
-            result.value.nodeDetails
-          );
-          delete nextErrors[entry.cacheKey];
+        if (!cachedNodeDetails) {
           return;
         }
 
-        requestedNodeDetailsKeysRef.current.delete(entry.cacheKey);
-        failedNodeDetailsKeysRef.current.add(entry.cacheKey);
-        nextErrors[entry.cacheKey] =
-          result.reason instanceof Error
-            ? result.reason.message
-            : "Failed to generate workflow node details.";
+        successfulDetails.set(entry.node.id, cachedNodeDetails);
+        delete nextErrors[entry.cacheKey];
       });
 
+      const returnedItemsById = new Map(items.map((item) => [item.id, item]));
+      const missingEntries: typeof uncachedEntries = [];
+
+      uncachedEntries.forEach((entry) => {
+        requestedNodeDetailsKeysRef.current.delete(entry.cacheKey);
+        const item = returnedItemsById.get(entry.node.id);
+
+        if (!item) {
+          missingEntries.push(entry);
+          return;
+        }
+
+        failedNodeDetailsKeysRef.current.delete(entry.cacheKey);
+        nodeDetailRetryCountsRef.current.delete(entry.cacheKey);
+        nodeDetailsCacheRef.current.set(entry.cacheKey, {
+          description: item.description,
+          details: item.details,
+          suggestions: item.suggestions,
+        });
+        successfulDetails.set(entry.node.id, {
+          description: item.description,
+          details: item.details,
+          suggestions: item.suggestions,
+        });
+        delete nextErrors[entry.cacheKey];
+      });
+
+      if (missingEntries.length > 0) {
+        const fallbackResults = await Promise.allSettled(
+          missingEntries.map(async (entry) => {
+            const nodeDetails = await generateWorkflowNodeDetails({
+              prompt: workflowPrompt,
+              model: workflowSettings.model,
+              provider: workflowSettings.provider,
+              node: {
+                id: entry.node.id,
+                label: entry.node.data.label,
+                description: entry.node.data.description,
+              },
+              context: {
+                workflowTitle: lastWorkflowTitleRef.current,
+                workflowSummary,
+                previousSteps: entry.previousSteps,
+                nextSteps: entry.nextSteps,
+              },
+            });
+
+            return {
+              entry,
+              nodeDetails,
+            };
+          })
+        );
+
+        fallbackResults.forEach((result, index) => {
+          const entry = missingEntries[index];
+
+          if (!entry) {
+            return;
+          }
+
+          if (result.status === "fulfilled") {
+            failedNodeDetailsKeysRef.current.delete(entry.cacheKey);
+            nodeDetailRetryCountsRef.current.delete(entry.cacheKey);
+            nodeDetailsCacheRef.current.set(entry.cacheKey, result.value.nodeDetails);
+            successfulDetails.set(entry.node.id, result.value.nodeDetails);
+            delete nextErrors[entry.cacheKey];
+            return;
+          }
+
+          failedNodeDetailsKeysRef.current.add(entry.cacheKey);
+          nextErrors[entry.cacheKey] =
+            result.reason instanceof Error
+              ? result.reason.message
+              : "Node details batch did not include this step.";
+        });
+      }
+
       if (successfulDetails.size > 0) {
+        writeNodeDetailsCache(nodeDetailsCacheRef.current);
+
         setNodes((currentNodes) =>
           currentNodes.map((node) => {
             const nodeDetails = successfulDetails.get(node.id);
@@ -1010,16 +1305,74 @@ export default function WorkflowBuilder() {
       setPendingNodeDetailKeys((current) =>
         current.filter(
           (key) =>
-            !pendingEntries.some((entry) => entry.cacheKey === key)
+            !uncachedEntries.some((entry) => entry.cacheKey === key)
         )
       );
+
+    }).catch((error) => {
+      if (unmountedRef.current) {
+        return;
+      }
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to generate workflow node details.";
+      const shouldRetry = isRetriableNodeDetailError(errorMessage);
+      let shouldRetryPendingEntries = false;
+
+      uncachedEntries.forEach((entry) => {
+        requestedNodeDetailsKeysRef.current.delete(entry.cacheKey);
+        const retryCount =
+          nodeDetailRetryCountsRef.current.get(entry.cacheKey) || 0;
+
+        if (shouldRetry && retryCount < NODE_DETAILS_MAX_RETRIES) {
+          nodeDetailRetryCountsRef.current.set(
+            entry.cacheKey,
+            retryCount + 1
+          );
+          shouldRetryPendingEntries = true;
+          return;
+        }
+
+        failedNodeDetailsKeysRef.current.add(entry.cacheKey);
+      });
+
+      setNodeDetailErrors((current) => {
+        const merged = { ...current };
+
+        uncachedEntries.forEach((entry) => {
+          merged[entry.cacheKey] = errorMessage;
+        });
+
+        return merged;
+      });
+
+      setPendingNodeDetailKeys((current) =>
+        current.filter(
+          (key) =>
+            !uncachedEntries.some((entry) => entry.cacheKey === key)
+        )
+      );
+
+      if (shouldRetryPendingEntries) {
+        setNodeDetailRetryTick((current) => current + 1);
+      }
     });
+
+    return () => {
+      window.clearTimeout(pendingKeysTimeoutId);
+    };
   }, [
     autoGenerateNodeDetails,
     edges,
+    nodeDetailRetryTick,
     nodes,
     nodeDetailsPlan,
+    selectedNodeId,
     setNodes,
+    workflowGoalPrompt,
+    workflowSummary,
   ]);
 
   /* ====================================================== */
@@ -1030,16 +1383,19 @@ export default function WorkflowBuilder() {
     setNodes(initialNodes);
     setEdges(initialEdges);
     setCanvasResetKey((current) => current + 1);
+    setChatbotClearKey((current) => current + 1);
     setSelectedNodeId(null);
     setSheetOpen(false);
     setAutoGenerateNodeDetails(false);
     clearGenerationError();
     setPendingNodeDetailKeys([]);
     setNodeDetailErrors({});
+    setNodeDetailRetryTick(0);
     lastWorkflowPromptRef.current = "";
     lastWorkflowSettingsRef.current = null;
     requestedNodeDetailsKeysRef.current.clear();
     failedNodeDetailsKeysRef.current.clear();
+    nodeDetailRetryCountsRef.current.clear();
     clearPersistedGraph();
   }, [clearGenerationError, clearPersistedGraph, setEdges, setNodes]);
 
@@ -1067,6 +1423,7 @@ export default function WorkflowBuilder() {
 
             <div className="relative h-full w-full">
               <Canvas
+                key={canvasResetKey}
                 nodes={categorizedNodes}
                 edges={edges}
                 nodeTypes={nodeTypes}
@@ -1078,10 +1435,9 @@ export default function WorkflowBuilder() {
                 onConnect={connectEdge}
                 onReconnectEdgeTarget={updateEdgeTarget}
                 fitView
-                resetViewKey={canvasResetKey}
               />
               {categoryLegend.length > 0 ? (
-                <div className="pointer-events-none absolute left-3 bottom-3 z-20 max-w-[min(32rem,calc(100%-5rem))] rounded-xl border border-border/70 bg-background/90 p-3 shadow-lg backdrop-blur-sm">
+                <div className="pointer-events-none absolute left-3 bottom-3 z-20 max-w-[min(60rem,calc(100%-3rem))] rounded-xl border border-border/70 bg-background/90 p-3 shadow-lg backdrop-blur-sm">
                   <div className="mb-2 flex items-center gap-2">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                       Workflow Domains
@@ -1111,7 +1467,7 @@ export default function WorkflowBuilder() {
 
         <div
           role="separator"
-          aria-orientation="vertical"
+           aria-orientation="vertical"
           onPointerDown={(event) => handleResizeStart(event.clientX)}
           className={cn(
             "group relative z-20 w-0 overflow-visible transition-opacity",
@@ -1134,6 +1490,7 @@ export default function WorkflowBuilder() {
         >
           <div className="h-full w-full overflow-hidden rounded-lg border border-border bg-card">
             <WorkflowChatbot
+              key={chatbotClearKey}
               error={generationError}
               loading={isGeneratingWorkflow}
               onSubmit={handlePromptSubmit}

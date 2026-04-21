@@ -13,7 +13,12 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { useTheme } from "next-themes";
+import {
+  NODE_CONNECTOR_SIZE,
+  NODE_HEIGHT,
+  NODE_WIDTH,
+} from "@/components/ai-elements/node";
+import { useTheme } from "@/components/theme-provider";
 
 type NodePosition = {
   x: number;
@@ -66,7 +71,6 @@ type CanvasProps<N extends CanvasNode = CanvasNode, E extends CanvasEdge = Canva
   nodeTypes: NodeTypes<N["data"]>;
   edgeTypes?: EdgeTypes;
   fitView?: boolean;
-  resetViewKey?: number;
   style?: CSSProperties;
   className?: string;
   colorMode?: "light" | "dark";
@@ -107,8 +111,8 @@ type MeasuredNode = {
 };
 
 const DEFAULT_NODE_SIZE: MeasuredNode = {
-  width: 320,
-  height: 144,
+  width: NODE_WIDTH,
+  height: NODE_HEIGHT,
 };
 
 const MIN_ZOOM = 0.45;
@@ -136,8 +140,7 @@ function getBezierPath({
 }
 
 function getBounds<N extends CanvasNode>(
-  nodes: N[],
-  measurements: Map<string, MeasuredNode>
+  nodes: N[]
 ) {
   if (nodes.length === 0) {
     return {
@@ -150,13 +153,11 @@ function getBounds<N extends CanvasNode>(
 
   return nodes.reduce(
     (acc, node) => {
-      const size = measurements.get(node.id) || DEFAULT_NODE_SIZE;
-
       return {
         minX: Math.min(acc.minX, node.position.x),
         minY: Math.min(acc.minY, node.position.y),
-        maxX: Math.max(acc.maxX, node.position.x + size.width),
-        maxY: Math.max(acc.maxY, node.position.y + size.height),
+        maxX: Math.max(acc.maxX, node.position.x + DEFAULT_NODE_SIZE.width),
+        maxY: Math.max(acc.maxY, node.position.y + DEFAULT_NODE_SIZE.height),
       };
     },
     {
@@ -177,7 +178,6 @@ export function Canvas<
   nodeTypes,
   edgeTypes = {},
   fitView = false,
-  resetViewKey = 0,
   style,
   className,
   colorMode = "light",
@@ -274,9 +274,6 @@ export function Canvas<
     width: 0,
     height: 0,
   });
-  const [measurements, setMeasurements] = useState<Map<string, MeasuredNode>>(
-    () => new Map()
-  );
   const selectedNodeIdSet = useMemo(
     () => new Set(selectedNodeIds),
     [selectedNodeIds]
@@ -285,16 +282,6 @@ export function Canvas<
     () => new Set(selectedEdgeIds),
     [selectedEdgeIds]
   );
-  const nodeElementsRef = useRef<Map<string, HTMLDivElement>>(
-    new Map()
-  );
-  const nodeObserversRef = useRef<Map<string, ResizeObserver>>(
-    new Map()
-  );
-  const nodeRefCallbacksRef = useRef<
-    Map<string, (element: HTMLDivElement | null) => void>
-  >(new Map());
-
   useLayoutEffect(() => {
     const element = containerRef.current;
 
@@ -327,101 +314,12 @@ export function Canvas<
     return () => observer.disconnect();
   }, []);
 
-  const registerNode = useCallback(
-    (nodeId: string, element: HTMLDivElement | null) => {
-      const existingElement = nodeElementsRef.current.get(nodeId);
-      const existingObserver = nodeObserversRef.current.get(nodeId);
-
-      if (!element) {
-        if (existingObserver) {
-          existingObserver.disconnect();
-          nodeObserversRef.current.delete(nodeId);
-        }
-        nodeElementsRef.current.delete(nodeId);
-        return;
-      }
-
-      if (existingElement === element) {
-        return;
-      }
-
-      if (existingObserver) {
-        existingObserver.disconnect();
-        nodeObserversRef.current.delete(nodeId);
-      }
-
-      nodeElementsRef.current.set(nodeId, element);
-
-      const updateSize = () => {
-        const nextSize = {
-          width: element.offsetWidth || DEFAULT_NODE_SIZE.width,
-          height: element.offsetHeight || DEFAULT_NODE_SIZE.height,
-        };
-
-        setMeasurements((prev) => {
-          const current = prev.get(nodeId);
-          if (
-            current &&
-            current.width === nextSize.width &&
-            current.height === nextSize.height
-          ) {
-            return prev;
-          }
-
-          const next = new Map(prev);
-          next.set(nodeId, nextSize);
-          return next;
-        });
-      };
-
-      updateSize();
-
-      const observer = new ResizeObserver(updateSize);
-      observer.observe(element);
-      nodeObserversRef.current.set(nodeId, observer);
-    },
-    []
-  );
-
-  const getNodeRef = useCallback(
-    (nodeId: string) => {
-      const existing = nodeRefCallbacksRef.current.get(nodeId);
-
-      if (existing) {
-        return existing;
-      }
-
-      const callback = (element: HTMLDivElement | null) => {
-        registerNode(nodeId, element);
-      };
-
-      nodeRefCallbacksRef.current.set(nodeId, callback);
-      return callback;
-    },
-    [registerNode]
-  );
-
-  useEffect(() => {
-    const nodeObservers = nodeObserversRef.current;
-    const nodeElements = nodeElementsRef.current;
-    const nodeRefCallbacks = nodeRefCallbacksRef.current;
-
-    return () => {
-      nodeObservers.forEach((observer) => {
-        observer.disconnect();
-      });
-      nodeObservers.clear();
-      nodeElements.clear();
-      nodeRefCallbacks.clear();
-    };
-  }, []);
-
   const autoViewport = useMemo(() => {
     if (!containerSize.width || !containerSize.height || nodes.length === 0) {
       return viewport;
     }
 
-    const bounds = getBounds(nodes, measurements);
+    const bounds = getBounds(nodes);
     const padding = 80;
     const graphWidth = Math.max(bounds.maxX - bounds.minX, 1);
     const graphHeight = Math.max(bounds.maxY - bounds.minY, 1);
@@ -446,22 +344,12 @@ export function Canvas<
   }, [
     containerSize.height,
     containerSize.width,
-    measurements,
     nodes,
     viewport,
   ]);
 
   const activeViewport =
     fitView && !viewportLocked ? autoViewport : viewport;
-
-  useEffect(() => {
-    setViewport({
-      x: 80,
-      y: 80,
-      zoom: 1,
-    });
-    setViewportLocked(false);
-  }, [resetViewKey]);
 
   const themeReady = useSyncExternalStore(
     () => () => {},
@@ -494,17 +382,12 @@ export function Canvas<
 
         if (!sourceNode || !targetNode) return null;
 
-        const sourceSize =
-          measurements.get(sourceNode.id) || DEFAULT_NODE_SIZE;
-        const targetSize =
-          measurements.get(targetNode.id) || DEFAULT_NODE_SIZE;
-
         return {
           edge,
-          sourceX: sourceNode.position.x + sourceSize.width,
-          sourceY: sourceNode.position.y + sourceSize.height / 2,
+          sourceX: sourceNode.position.x + DEFAULT_NODE_SIZE.width,
+          sourceY: sourceNode.position.y + DEFAULT_NODE_SIZE.height / 2,
           targetX: targetNode.position.x,
-          targetY: targetNode.position.y + targetSize.height / 2,
+          targetY: targetNode.position.y + DEFAULT_NODE_SIZE.height / 2,
         };
       })
       .filter(Boolean) as Array<{
@@ -514,19 +397,16 @@ export function Canvas<
       targetX: number;
       targetY: number;
     }>;
-  }, [edges, measurements, nodes]);
+  }, [edges, nodes]);
 
   const nodeBounds = useMemo(() => {
     return nodes.map((node) => {
-      const size =
-        measurements.get(node.id) || DEFAULT_NODE_SIZE;
-
       return {
         id: node.id,
         left: node.position.x,
         top: node.position.y,
-        right: node.position.x + size.width,
-        bottom: node.position.y + size.height,
+        right: node.position.x + DEFAULT_NODE_SIZE.width,
+        bottom: node.position.y + DEFAULT_NODE_SIZE.height,
         handles: node.data as {
           handles?: {
             source?: boolean;
@@ -535,7 +415,7 @@ export function Canvas<
         },
       };
     });
-  }, [measurements, nodes]);
+  }, [nodes]);
 
   const connectionPreviewPath = useMemo(() => {
     if (!connectionPreview) return null;
@@ -1361,7 +1241,6 @@ export function Canvas<
           return (
             <div
               key={node.id}
-              ref={getNodeRef(node.id)}
               onPointerDown={(event) => {
                 event.stopPropagation();
 
@@ -1441,7 +1320,11 @@ export function Canvas<
                 <button
                   type="button"
                   aria-label={`Target handle for ${node.id}`}
-                  className="absolute left-0 top-1/2 z-20 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent"
+                  className="absolute left-0 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border/80 bg-background shadow-sm transition-colors hover:border-primary"
+                  style={{
+                    width: `${NODE_CONNECTOR_SIZE}px`,
+                    height: `${NODE_CONNECTOR_SIZE}px`,
+                  }}
                   onPointerUp={(event) => {
                     event.stopPropagation();
                   }}
@@ -1451,7 +1334,11 @@ export function Canvas<
                 <button
                   type="button"
                   aria-label={`Source handle for ${node.id}`}
-                  className="absolute right-0 top-1/2 z-20 h-5 w-5 translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent"
+                  className="absolute right-0 top-1/2 z-20 translate-x-1/2 -translate-y-1/2 rounded-full border border-border/80 bg-background shadow-sm transition-colors hover:border-primary"
+                  style={{
+                    width: `${NODE_CONNECTOR_SIZE}px`,
+                    height: `${NODE_CONNECTOR_SIZE}px`,
+                  }}
                   onPointerDown={(event) => {
                     event.stopPropagation();
 
@@ -1467,24 +1354,12 @@ export function Canvas<
 
                     setConnectionPreview({
                       sourceNodeId: node.id,
-                      sourceX:
-                        node.position.x +
-                        (measurements.get(node.id)?.width ||
-                          DEFAULT_NODE_SIZE.width),
+                      sourceX: node.position.x + DEFAULT_NODE_SIZE.width,
                       sourceY:
-                        node.position.y +
-                        (measurements.get(node.id)?.height ||
-                          DEFAULT_NODE_SIZE.height) /
-                          2,
-                      targetX:
-                        node.position.x +
-                        (measurements.get(node.id)?.width ||
-                          DEFAULT_NODE_SIZE.width),
+                        node.position.y + DEFAULT_NODE_SIZE.height / 2,
+                      targetX: node.position.x + DEFAULT_NODE_SIZE.width,
                       targetY:
-                        node.position.y +
-                        (measurements.get(node.id)?.height ||
-                          DEFAULT_NODE_SIZE.height) /
-                          2,
+                        node.position.y + DEFAULT_NODE_SIZE.height / 2,
                     });
                     setReconnectingEdgeId(null);
                     setHoveredTargetNodeId(null);
@@ -1499,7 +1374,13 @@ export function Canvas<
                 selected={selectedNodeIdSet.has(node.id)}
               />
               {hoveredTargetNodeId === node.id ? (
-                <span className="pointer-events-none absolute left-0 top-1/2 z-30 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-primary/15" />
+                <span
+                  className="pointer-events-none absolute left-0 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-primary/15"
+                  style={{
+                    width: `${NODE_CONNECTOR_SIZE}px`,
+                    height: `${NODE_CONNECTOR_SIZE}px`,
+                  }}
+                />
               ) : null}
             </div>
           );

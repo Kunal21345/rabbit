@@ -48,7 +48,7 @@ type NodeSheetProps = {
 
 type EditableNodeField = Exclude<
   keyof NodeData,
-  "id" | "label" | "nextNodeIds"
+  "id" | "nextNodeIds"
 >;
 
 type FieldSchema = {
@@ -62,6 +62,11 @@ type FieldSchema = {
 /* -------------------------------------------------- */
 
 const MAIN_FIELDS: FieldSchema[] = [
+  {
+    key: "label",
+    label: "Step title",
+    type: "input",
+  },
   {
     key: "description",
     label: "Step description",

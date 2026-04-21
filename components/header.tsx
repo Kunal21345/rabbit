@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -18,12 +17,11 @@ export function Header({ children, className }: HeaderProps) {
       )}
     >
       <div className="flex items-center gap-3">
-        <Image
+        <img
           src="/logo.svg"
           alt="Workflow App logo"
           width={20}
           height={26}
-          priority
           className="dark:invert"
         />
       </div>

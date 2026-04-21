@@ -7,6 +7,7 @@ import type {
 } from "@/hooks/useWorkflowGraph";
 import { generateWorkflowGraph, type WorkflowSubmitResult } from "@/lib/workflow-client";
 import type {
+  WorkflowConversationContextMessage,
   WorkflowGenerationModel,
   WorkflowProvider,
 } from "@/lib/workflow-generation";
@@ -38,7 +39,8 @@ export function useWorkflowGeneration({
     async (
       prompt: string,
       model: WorkflowGenerationModel,
-      provider: WorkflowProvider
+      provider: WorkflowProvider,
+      conversationContext?: WorkflowConversationContextMessage[]
     ): Promise<WorkflowSubmitResult> => {
       setGenerationError(null);
       setIsGeneratingWorkflow(true);
@@ -48,6 +50,7 @@ export function useWorkflowGeneration({
           prompt,
           model,
           provider,
+          conversationContext,
           currentGraph: {
             nodes: nodesRef.current.map((node) => ({
               id: node.id,

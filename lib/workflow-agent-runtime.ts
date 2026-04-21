@@ -54,6 +54,7 @@ const INSECURE_TLS_PROVIDERS = new Set(
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean)
 );
+const LOGGED_TRANSPORT_PATHS = new Set<string>();
 
 console.info("[workflow-runtime] TLS config", {
   caPath: CONFIGURED_CA_CERT_PATH || null,
@@ -107,6 +108,38 @@ function isTlsCertificateError(error: unknown): boolean {
 
   return /self-signed certificate|certificate chain|unable to verify/i.test(
     message
+  );
+}
+
+function logTransportPathOnce(
+  mode: "fetch" | "corporate-tls",
+  url: string,
+  provider?: WorkflowProvider
+) {
+  const logKey = [
+    mode,
+    provider || "unknown",
+    getHostname(url),
+    CONFIGURED_CA_CERT_PATH || "no-ca",
+    shouldAllowInsecureTls(url, provider) ? "insecure" : "secure",
+  ].join("|");
+
+  if (LOGGED_TRANSPORT_PATHS.has(logKey)) {
+    return;
+  }
+
+  LOGGED_TRANSPORT_PATHS.add(logKey);
+
+  console.info(
+    `[workflow-runtime] using ${
+      mode === "corporate-tls" ? "corporate TLS path" : "fetch path"
+    }`,
+    {
+      provider,
+      host: getHostname(url),
+      caPath: CONFIGURED_CA_CERT_PATH || null,
+      insecureTls: shouldAllowInsecureTls(url, provider),
+    }
   );
 }
 
@@ -182,6 +215,8 @@ const OLLAMA_API_URL =
 const PROVIDER_TIMEOUT_MS = 30000;
 const GROQ_RATE_LIMIT_MAX_RETRIES = 2;
 const GROQ_RATE_LIMIT_MAX_WAIT_MS = 8000;
+const STRUCTURED_REQUEST_MAX_RETRIES = 2;
+const STRUCTURED_REQUEST_RETRY_BASE_DELAY_MS = 1200;
 
 export const MISSING_API_KEY_MESSAGES: Record<
   Exclude<WorkflowProvider, "ollama">,
@@ -526,6 +561,58 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isRetriableStructuredRequestError(error: unknown) {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+
+  return (
+    message.includes("timed out") ||
+    message.includes("rate limit") ||
+    message.includes("429") ||
+    message.includes("500") ||
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504") ||
+    message.includes("overloaded") ||
+    message.includes("temporarily unavailable") ||
+    message.includes("econnreset") ||
+    message.includes("socket hang up") ||
+    message.includes("network error")
+  );
+}
+
+async function withStructuredRequestRetry<T>(
+  request: () => Promise<T>
+): Promise<T> {
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (attempt <= STRUCTURED_REQUEST_MAX_RETRIES) {
+    try {
+      return await request();
+    } catch (error) {
+      lastError = error;
+
+      if (
+        attempt >= STRUCTURED_REQUEST_MAX_RETRIES ||
+        !isRetriableStructuredRequestError(error)
+      ) {
+        throw error;
+      }
+
+      const delayMs =
+        STRUCTURED_REQUEST_RETRY_BASE_DELAY_MS * (attempt + 1);
+
+      await wait(delayMs);
+      attempt += 1;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Structured request failed.");
+}
+
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit,
@@ -540,12 +627,7 @@ async function fetchWithTimeout(
     // Only force node:https for internal/corporate gateways that need the
     // additional trust bundle. Public provider APIs should use normal fetch.
     if (shouldUseCorporateTls(url)) {
-      console.info("[workflow-runtime] using corporate TLS path", {
-        provider,
-        host: getHostname(url),
-        caPath: CONFIGURED_CA_CERT_PATH || null,
-        insecureTls: shouldAllowInsecureTls(url, provider),
-      });
+      logTransportPathOnce("corporate-tls", url, provider);
       return await httpsRequestToResponse(
         url,
         init,
@@ -555,12 +637,7 @@ async function fetchWithTimeout(
     }
 
     try {
-      console.info("[workflow-runtime] using fetch path", {
-        provider,
-        host: getHostname(url),
-        caPath: CONFIGURED_CA_CERT_PATH || null,
-        insecureTls: shouldAllowInsecureTls(url, provider),
-      });
+      logTransportPathOnce("fetch", url, provider);
       return await fetch(input, {
         ...init,
         signal: controller.signal,
@@ -927,7 +1004,7 @@ export async function requestStructuredJson<T>(
           : requestOllamaStructured(retryRequest);
   };
 
-  const firstOutput = await requestPrimary();
+  const firstOutput = await withStructuredRequestRetry(requestPrimary);
 
   try {
     const parsed = input.parse(firstOutput.content);
@@ -942,7 +1019,7 @@ export async function requestStructuredJson<T>(
       warnings: firstOutput.warnings,
     };
   } catch (firstError) {
-    const retryOutput = await requestRetry();
+    const retryOutput = await withStructuredRequestRetry(requestRetry);
 
     try {
       const parsed = input.parse(retryOutput.content);

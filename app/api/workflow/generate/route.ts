@@ -84,12 +84,34 @@ function normalizeRequest(
         }
       : undefined;
 
+  const conversationContext = Array.isArray(record.conversationContext)
+    ? record.conversationContext
+        .filter(
+          (
+            message
+          ): message is Record<string, unknown> =>
+            typeof message === "object" && message !== null
+        )
+        .map((message) => {
+          const role: "assistant" | "user" =
+            message.role === "assistant" ? "assistant" : "user";
+
+          return {
+            role,
+            content: sanitizeText(message.content, 1200),
+          };
+        })
+        .filter((message) => message.content)
+        .slice(-8)
+    : undefined;
+
   return {
     prompt: sanitizeText(record.prompt, 8000),
     model,
     provider,
     apiKey: sanitizeText(record.apiKey, 500),
     currentGraph,
+    conversationContext,
   };
 }
 
@@ -115,6 +137,8 @@ function buildPrompt(input: WorkflowGraphRequest) {
     "responseMessage should explain the process, strategy, and operating logic of the workflow, not just announce that a workflow was created.",
     "responseMessage should help the user understand how the workflow works in practice, ideally with a simple analogy or mental model when useful.",
     "responseMessage should mention the important phases, handoffs, checkpoints, or decisions that shape the workflow.",
+    "responseMessage must stay concise and fit in at most 2 short paragraphs.",
+    "responseMessage should stay under 900 characters while remaining specific and useful.",
     "responseMessage must not contain JSON, code, schema descriptions, arrays, objects, or field names.",
     "Avoid generic openers like 'Here is the workflow' or 'Below is the workflow'.",
     "reasoningSummary must explain why the workflow was structured this way in plain English.",
@@ -127,6 +151,10 @@ function buildPrompt(input: WorkflowGraphRequest) {
     "Do not include details or suggestions.",
     "",
     `User use case:\n${input.prompt}`,
+    "",
+    input.conversationContext?.length
+      ? `Recent conversation context:\n${JSON.stringify(input.conversationContext, null, 2)}`
+      : "Recent conversation context:\nNone",
     "",
     input.currentGraph
       ? `Current graph context:\n${JSON.stringify(input.currentGraph, null, 2)}`

@@ -57,6 +57,7 @@ import {
   LLM_PROVIDER_STORAGE_KEY,
   WORKFLOW_MODEL_OPTIONS_BY_PROVIDER,
   WORKFLOW_PROVIDER_OPTIONS,
+  type WorkflowConversationContextMessage,
   type WorkflowGenerationModel,
   type WorkflowProvider,
 } from "@/lib/workflow-generation";
@@ -73,6 +74,10 @@ type ChatMessage = {
   model?: string;
 };
 
+type ChatMessageExtra = Partial<
+  Pick<ChatMessage, "id" | "reasoning" | "warnings" | "model">
+>;
+
 type SubmitResult = {
   ok: boolean;
   message: string;
@@ -88,9 +93,24 @@ type WorkflowChatbotProps = {
   onSubmit: (
     prompt: string,
     model: WorkflowGenerationModel,
-    provider: WorkflowProvider
+    provider: WorkflowProvider,
+    conversationContext?: WorkflowConversationContextMessage[]
   ) => Promise<SubmitResult>;
 };
+
+const CHAT_MESSAGES_STORAGE_KEY = "workflow-chat-messages-v1";
+const MAX_PERSISTED_MESSAGES = 12;
+const MAX_CONTEXT_MESSAGES = 8;
+const MAX_MESSAGE_CONTENT_LENGTH = 1200;
+
+function getStoredProvider(): WorkflowProvider {
+  if (typeof window === "undefined") {
+    return "groq";
+  }
+
+  const storedProviderRaw = localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
+  return isWorkflowProvider(storedProviderRaw) ? storedProviderRaw : "groq";
+}
 
 function getStoredModel(provider: WorkflowProvider): WorkflowGenerationModel {
   if (typeof window === "undefined") {
@@ -128,10 +148,10 @@ function getModelForProvider(
 function createMessage(
   role: ChatRole,
   content: string,
-  extra?: Partial<Omit<ChatMessage, "id" | "role" | "content">>
+  extra?: ChatMessageExtra
 ): ChatMessage {
   return {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: extra?.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role,
     content,
     ...extra,
@@ -170,15 +190,94 @@ function normalizeResponseMessage(message?: string, fallback?: string) {
     !trimmed.startsWith("[") &&
     !trimmed.startsWith("```")
   ) {
-    return trimmed;
+    return trimmed.slice(0, MAX_MESSAGE_CONTENT_LENGTH);
   }
 
-  return fallback?.trim() || "Workflow updated.";
+  return (fallback?.trim() || "Workflow updated.").slice(
+    0,
+    MAX_MESSAGE_CONTENT_LENGTH
+  );
+}
+
+function limitMessageContent(content: string) {
+  return content.trim().slice(0, MAX_MESSAGE_CONTENT_LENGTH);
+}
+
+function trimMessages(messages: ChatMessage[]) {
+  if (messages.length <= MAX_PERSISTED_MESSAGES) {
+    return messages;
+  }
+
+  const initialMessage =
+    messages.find((message) => message.id === INITIAL_MESSAGE.id) || INITIAL_MESSAGE;
+  const recentMessages = messages
+    .filter((message) => message.id !== initialMessage.id)
+    .slice(-(MAX_PERSISTED_MESSAGES - 1));
+
+  return [initialMessage, ...recentMessages];
+}
+
+function buildConversationContext(messages: ChatMessage[]) {
+  return messages
+    .filter((message) => message.id !== INITIAL_MESSAGE.id)
+    .slice(-MAX_CONTEXT_MESSAGES)
+    .map<WorkflowConversationContextMessage>((message) => ({
+      role: message.role,
+      content: limitMessageContent(message.content),
+    }));
+}
+
+function isChatMessage(value: unknown): value is ChatMessage {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    "role" in value &&
+    "content" in value &&
+    typeof value.id === "string" &&
+    (value.role === "assistant" || value.role === "user") &&
+    typeof value.content === "string"
+  );
+}
+
+function readStoredMessages() {
+  if (typeof window === "undefined") {
+    return [INITIAL_MESSAGE];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CHAT_MESSAGES_STORAGE_KEY);
+
+    if (!raw) {
+      return [INITIAL_MESSAGE];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!Array.isArray(parsed) || !parsed.every(isChatMessage)) {
+      return [INITIAL_MESSAGE];
+    }
+
+    return parsed.length > 0 ? parsed : [INITIAL_MESSAGE];
+  } catch {
+    return [INITIAL_MESSAGE];
+  }
+}
+
+export function clearStoredWorkflowChatMessages() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(CHAT_MESSAGES_STORAGE_KEY);
 }
 
 const INITIAL_MESSAGE = createMessage(
   "assistant",
-  "Describe your workflow and I will build or update the graph for you."
+  "Describe your workflow and I will build or update the graph for you.",
+  {
+    id: "initial-assistant-message",
+  }
 );
 
 export function WorkflowChatbot({
@@ -192,9 +291,10 @@ export function WorkflowChatbot({
     getDefaultWorkflowModel("groq")
   );
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE]);
+  const [storageHydrated, setStorageHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsProvider, setSettingsProvider] = useState<WorkflowProvider>("groq");
-  const [settingsModel, setSettingsModel] = useState<WorkflowGenerationModel>(
+  const [settingsModel, setSettingsModel] = useState<WorkflowGenerationModel>(() =>
     getDefaultWorkflowModel("groq")
   );
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
@@ -213,22 +313,17 @@ export function WorkflowChatbot({
     modelOptions.find((candidate) => candidate.value === model)?.label || model;
 
   useEffect(() => {
-    const syncStoredSettings = () => {
-      const storedProviderRaw = localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
-      const nextProvider = isWorkflowProvider(storedProviderRaw)
-        ? storedProviderRaw
-        : "groq";
+    queueMicrotask(() => {
+      const nextProvider = getStoredProvider();
       const nextModel = getStoredModel(nextProvider);
 
       setProvider(nextProvider);
       setModel(nextModel);
+      setMessages(trimMessages(readStoredMessages()));
       setSettingsProvider(nextProvider);
       setSettingsModel(nextModel);
-    };
-
-    const timeoutId = window.setTimeout(syncStoredSettings, 0);
-
-    return () => window.clearTimeout(timeoutId);
+      setStorageHydrated(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -245,22 +340,39 @@ export function WorkflowChatbot({
     });
   }, [messages, loading]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !storageHydrated) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      CHAT_MESSAGES_STORAGE_KEY,
+      JSON.stringify(trimMessages(messages))
+    );
+  }, [messages, storageHydrated]);
+
   const sendPrompt = useCallback(async () => {
-    const prompt = draft.trim();
+    const prompt = limitMessageContent(draft);
 
     if (!prompt || loading) return;
 
+    const nextMessages = trimMessages([
+      ...messages,
+      createMessage("user", prompt),
+    ]);
+
     setDraft("");
-    setMessages((current) => [...current, createMessage("user", prompt)]);
+    setMessages(nextMessages);
 
     try {
       const result = await onSubmit(
         prompt,
         model,
-        provider
+        provider,
+        buildConversationContext(nextMessages)
       );
 
-      setMessages((current) => [
+      setMessages((current) => trimMessages([
         ...current,
         createMessage(
           "assistant",
@@ -271,14 +383,14 @@ export function WorkflowChatbot({
             model: result.model,
           }
         ),
-      ]);
+      ]));
     } catch {
-      setMessages((current) => [
+      setMessages((current) => trimMessages([
         ...current,
         createMessage("assistant", "Something went wrong. Please try again."),
-      ]);
+      ]));
     }
-  }, [draft, loading, model, onSubmit, provider]);
+  }, [draft, loading, messages, model, onSubmit, provider]);
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -299,8 +411,12 @@ export function WorkflowChatbot({
   );
 
   const handleResetChat = useCallback(() => {
-    if (loading) return;
+    if (loading) {
+      return;
+    }
 
+    clearStoredWorkflowChatMessages();
+    setDraft("");
     setMessages([INITIAL_MESSAGE]);
   }, [loading]);
 
@@ -347,6 +463,22 @@ export function WorkflowChatbot({
                     type="button"
                     variant="ghost"
                     size="sm"
+                    aria-label="Start new chat"
+                    className="rounded-sm text-muted-foreground"
+                    disabled={loading}
+                    onClick={handleResetChat}
+                  >
+                    <SquarePen data-icon="inline-start" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">New chat</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
                     aria-label="Chatbot settings"
                     className="rounded-sm text-muted-foreground"
                     onClick={handleOpenSettings}
@@ -355,22 +487,6 @@ export function WorkflowChatbot({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Settings</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleResetChat}
-                    disabled={loading}
-                    aria-label="Reset chat"
-                    className="rounded-sm text-muted-foreground"
-                  >
-                    <SquarePen data-icon="inline-start" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Reset chat</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>

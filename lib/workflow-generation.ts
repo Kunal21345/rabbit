@@ -93,12 +93,18 @@ export type WorkflowGraphContext = {
   }>;
 };
 
+export type WorkflowConversationContextMessage = {
+  role: "assistant" | "user";
+  content: string;
+};
+
 export type WorkflowGraphRequest = {
   prompt: string;
   model: WorkflowGenerationModel;
   provider?: WorkflowProvider;
   apiKey?: string;
   currentGraph?: WorkflowGraphContext;
+  conversationContext?: WorkflowConversationContextMessage[];
 };
 
 export type GeneratedWorkflowGraph = {
@@ -145,11 +151,40 @@ export type WorkflowNodeDetailsRequest = {
   };
 };
 
+export type WorkflowNodeDetailsBatchRequest = {
+  prompt: string;
+  model: WorkflowGenerationModel;
+  provider?: WorkflowProvider;
+  apiKey?: string;
+  context?: {
+    workflowTitle?: string;
+    workflowSummary?: string;
+  };
+  nodes: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    previousSteps?: Array<{
+      id: string;
+      label: string;
+    }>;
+    nextSteps?: Array<{
+      id: string;
+      label: string;
+    }>;
+  }>;
+};
+
 export type GeneratedWorkflowNodeDetails = {
   description: string;
   details: string;
   suggestions: string;
 };
+
+export type GeneratedWorkflowNodeDetailsBatchItem =
+  GeneratedWorkflowNodeDetails & {
+    id: string;
+  };
 
 type DagreNode = {
   x: number;
@@ -237,6 +272,36 @@ export const WORKFLOW_NODE_DETAILS_SCHEMA = {
     },
     suggestions: {
       type: "string",
+    },
+  },
+} as const;
+
+export const WORKFLOW_NODE_DETAILS_BATCH_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "description", "details", "suggestions"],
+        properties: {
+          id: {
+            type: "string",
+          },
+          description: {
+            type: "string",
+          },
+          details: {
+            type: "string",
+          },
+          suggestions: {
+            type: "string",
+          },
+        },
+      },
     },
   },
 } as const;
@@ -341,10 +406,10 @@ export function buildWorkflowGraph(
   const graph = new dagre.graphlib.Graph();
   graph.setGraph({
     rankdir: "LR",
-    nodesep: 90,
-    ranksep: 180,
-    marginx: 40,
-    marginy: 40,
+    nodesep: 130,
+    ranksep: 240,
+    marginx: 60,
+    marginy: 60,
   });
   graph.setDefaultEdgeLabel(() => ({}));
 

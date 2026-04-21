@@ -11,6 +11,10 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
+export const NODE_WIDTH = 420;
+export const NODE_HEIGHT = 220;
+export const NODE_CONNECTOR_SIZE = 20;
+
 export type NodeProps = ComponentProps<typeof Card> & {
   handles: {
     target: boolean;
@@ -20,28 +24,24 @@ export type NodeProps = ComponentProps<typeof Card> & {
 };
 
 export const Node = ({
-  handles,
   className,
   selected = false,
   ...props
 }: NodeProps) => (
   <Card
     className={cn(
-      "node-container relative size-full h-auto w-sm gap-0 rounded-2xl p-0 transition-[box-shadow,border-color] duration-150 overflow-hidden",
+      "node-container relative gap-0 overflow-hidden rounded-2xl p-0 transition-[box-shadow,border-color] duration-150",
       selected &&
         "border-primary shadow-[0_0_0_2px_color-mix(in_oklab,var(--primary)_30%,transparent)]",
       className
     )}
+    style={{
+      width: `${NODE_WIDTH}px`,
+      height: `${NODE_HEIGHT}px`,
+      ...props.style,
+    }}
     {...props}
-  >
-    {handles.target && (
-      <span className="pointer-events-none absolute left-0 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-background shadow-sm" />
-    )}
-    {handles.source && (
-      <span className="pointer-events-none absolute right-0 top-1/2 h-3 w-3 translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-background shadow-sm" />
-    )}
-    {props.children}
-  </Card>
+  />
 );
 
 export type NodeHeaderProps = ComponentProps<typeof CardHeader>;
@@ -70,10 +70,10 @@ export const NodeAction = (props: NodeActionProps) => <CardAction {...props} />;
 export type NodeContentProps = ComponentProps<typeof CardContent>;
 
 export const NodeContent = ({ className, ...props }: NodeContentProps) => (
-  <CardContent className={cn("p-4", className)} {...props} />
+  <CardContent className={cn("px-8, py-4", className)} {...props} />
 );
 
-export type NodeFooterProps = ComponentProps<typeof CardFooter>;
+//export type NodeFooterProps = ComponentProps<typeof CardFooter>;
 
 // export const NodeFooter = ({ className, ...props }: NodeFooterProps) => (
 //   <CardFooter

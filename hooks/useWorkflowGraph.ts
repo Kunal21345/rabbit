@@ -64,7 +64,7 @@ type NewNodeSeed = Partial<
 function buildNextNodePosition(nodes: WorkflowNode) {
   return {
     x: nodes.position.x,
-    y: nodes.position.y + 250,
+    y: nodes.position.y + 300,
   };
 }
 
