@@ -77,22 +77,30 @@ function shouldAllowInsecureTls(
 
   return (
     ALLOW_INSECURE_PROVIDER_TLS ||
-    (provider === "claude" && ALLOW_INSECURE_CLAUDE_TLS)
-    || INSECURE_TLS_HOSTS.has(hostname)
-    || (provider ? INSECURE_TLS_PROVIDERS.has(provider) : false)
+    (provider === "claude" && ALLOW_INSECURE_CLAUDE_TLS) ||
+    INSECURE_TLS_HOSTS.has(hostname) ||
+    (provider ? INSECURE_TLS_PROVIDERS.has(provider) : false)
   );
 }
 
-function shouldUseCorporateTls(url: string): boolean {
-  if (!CORPORATE_CA || !url.startsWith("https://")) {
+function shouldUseCustomTls(url: string, provider?: WorkflowProvider): boolean {
+  if (!url.startsWith("https://")) {
     return false;
   }
 
   const hostname = getHostname(url);
 
   return (
+    Boolean(CORPORATE_CA) ||
     FORCE_HTTPS_HOSTS.has(hostname) ||
+<<<<<<< HEAD
     hostname === "localhost"
+=======
+    shouldAllowInsecureTls(url, provider) ||
+    hostname === "localhost" ||
+    hostname.endsWith(".mphasis.ai") ||
+    hostname.endsWith(".gcp.mphasis.ai")
+>>>>>>> 0e5407c (refactor: enhance TLS handling for custom providers and improve request routing)
   );
 }
 
@@ -111,6 +119,7 @@ function isTlsCertificateError(error: unknown): boolean {
   );
 }
 
+<<<<<<< HEAD
 function logTransportPathOnce(
   mode: "fetch" | "corporate-tls",
   url: string,
@@ -146,6 +155,10 @@ function logTransportPathOnce(
 // When a corporate CA is present, make a TLS-verified request using node:https
 // instead of the global fetch (which Next.js may patch and which ignores
 // NODE_EXTRA_CA_CERTS in some configurations).
+=======
+// Make a TLS-aware request using node:https when we need a custom CA bundle or
+// host/provider-specific TLS overrides that the global fetch path may ignore.
+>>>>>>> 0e5407c (refactor: enhance TLS handling for custom providers and improve request routing)
 async function httpsRequestToResponse(
   url: string,
   init: RequestInit,
@@ -624,10 +637,22 @@ async function fetchWithTimeout(
   try {
     const url = String(input);
 
+<<<<<<< HEAD
     // Only force node:https for internal/corporate gateways that need the
     // additional trust bundle. Public provider APIs should use normal fetch.
     if (shouldUseCorporateTls(url)) {
       logTransportPathOnce("corporate-tls", url, provider);
+=======
+    // Route requests with custom TLS needs through node:https immediately so
+    // host/provider overrides apply on the first attempt.
+    if (shouldUseCustomTls(url, provider)) {
+      console.info("[workflow-runtime] using custom TLS path", {
+        provider,
+        host: getHostname(url),
+        caPath: CONFIGURED_CA_CERT_PATH || "certs/mphasis-chain.pem",
+        insecureTls: shouldAllowInsecureTls(url, provider),
+      });
+>>>>>>> 0e5407c (refactor: enhance TLS handling for custom providers and improve request routing)
       return await httpsRequestToResponse(
         url,
         init,
